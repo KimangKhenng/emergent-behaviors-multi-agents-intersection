@@ -1,56 +1,147 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fu
+from torch.distributions import Beta
 
 
 # Define hybrid policy architecture
 class Policy(nn.Module):
-    FLATTENED_FEATURES = None
 
-    def __init__(self, state_size, image_height, image_width, action_size):
+    def __init__(self, state_size=19, vocab_size=32):
         super(Policy, self).__init__()
         # Process state information
         self.fc1 = nn.Linear(in_features=state_size, out_features=64)
         self.fc2 = nn.Linear(in_features=64, out_features=32)
 
         # Process front view image
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            # nn.Flatten(start_dim=0)
+        )
+
+        # self.conv = self.conv.cuda()
+
+        # 1D Average pooling layer
+        self.avg_pool = nn.AvgPool1d(kernel_size=6, stride=4)
+
+        # # Batch normalization layers
+        # self.bn1 = nn.BatchNorm1d(23040)
+
+        self.embedding_dim = 7680 + 32
+
+        #  Embedding layer
+        self.embedding = nn.Embedding(vocab_size, 256)
+
+        # Multi-head attention layer
+        self.self_attn = nn.MultiheadAttention(256, num_heads=8, dropout=0.1)
 
         # LSTM layer
-        self.lstm = nn.LSTM(42368, hidden_size=16, num_layers=1, batch_first=True)
+        self.lstm = nn.LSTM(7680 + 32, hidden_size=32, num_layers=1, batch_first=True)
 
-        # Final dense layer for classification
-        self.final_dense = nn.Linear(in_features=16, out_features=action_size)
-        self.softmax = nn.Softmax(dim=-1)
+        # Final dense layer for steering angle
+        self.final_dense_sa = nn.Sequential(
+            nn.Linear(in_features=1792, out_features=200),
+            nn.ReLU(),
+            nn.Linear(in_features=200, out_features=100),
+            nn.ReLU(),
+            nn.Linear(in_features=100, out_features=2),
+        )
 
-        # Compute the number of features in the flattened output
-        with torch.no_grad():
-            dummy_input_img = torch.randn(1, 3, image_height, image_width)
-            dummy_output_img = self.conv2(self.pool(Fu.relu(self.conv1(dummy_input_img))))
-            Policy.FLATTENED_FEATURES = dummy_output_img.numel()
+        # Final dense layer for acceleration
+        self.final_dense_acc = nn.Sequential(
+            nn.Linear(in_features=1792, out_features=200),
+            nn.ReLU(),
+            nn.Linear(in_features=200, out_features=100),
+            nn.ReLU(),
+            nn.Linear(in_features=100, out_features=2),
+        )
 
-    def forward(self, x_img, x_vec):
+    def forward(self, x_vec, x_img):
         # Image processing
-        x_img = Fu.relu(self.conv1(x_img))
-        x_img = self.pool(x_img)
-        x_img = Fu.relu(self.conv2(x_img))
-        x_img = self.pool(x_img)
-        x_img = torch.flatten(x_img)
-
-        # Processing another input vector
+        x_img = self.conv(x_img)
+        # print(x_img.ndim)
+        if x_img.ndim == 3:
+            # print("Single Input")
+            x_img = torch.flatten(x_img)
+        if x_img.ndim == 4:
+            # print("Batch Input")
+            x_img = torch.flatten(x_img, start_dim=1)
+        # Processing state
         x_vec = Fu.relu(self.fc1(x_vec))
         x_vec = Fu.relu(self.fc2(x_vec))
 
+        # print("X Vec Shape: ", x_vec.shape)
+        # print("X Img Shape: ", x_img.shape)
         # Concatenate image output and vector output
-        x = torch.cat((x_img, x_vec))
+        x = 0
+        if x_img.ndim == 1:
+            x = torch.cat((x_img, x_vec))
+        if x_img.ndim == 2:
+            x = torch.cat((x_img, x_vec), dim=1)
 
-        # LSTM layer
-        x = x.unsqueeze(0)  # Add sequence length dimension
-        x, _ = self.lstm(x)
-        x = x.squeeze(0)  # Remove sequence length dimension
+        x = x.long()
+        x = x.unsqueeze(-1)
+        embedded = self.embedding(x)
+        # embedded = embedded.to_dense()
+        # print("Embedded Shape: ", embedded.shape)
+        if embedded.ndim == 3:
+            x = embedded.permute(1, 0, 2)
+        if embedded.ndim == 4:
+            x = embedded.permute(2, 0, 1, 3)
+            x = x.squeeze(0)
 
-        # Final dense layer for classification
-        x = self.softmax(self.final_dense(x))
+        # print("After Shape: ", x.shape)
+
+        # Apply self-attention with residual connection and layer normalization
+        attn_output, _ = self.self_attn(x, x, x)
+        attn_output = Fu.layer_norm(x + attn_output, [attn_output.shape[-1]])
+
+        # Reshape the self-attention output to match the LSTM input shape
+        # Shape: (batch size, sequence length, embedding dimension)
+        attn_output = attn_output.permute(0, 2, 1)
+
+        # # LSTM layer
+        # x = x.unsqueeze(0)  # Add sequence length dimension
+        lstm_output, _ = self.lstm(attn_output)
+        lstm_output = lstm_output.squeeze(0)  # Remove sequence length dimension
+
+        # Flatten lstm output
+        lstm_output = self.avg_pool(lstm_output)
+        # print("LSTM Output Shape: ", lstm_output.shape)
+        if lstm_output.ndim == 2:
+            lstm_output = torch.flatten(lstm_output)
+        else:
+            lstm_output = torch.flatten(lstm_output, start_dim=1)
+
+        # Output alpha and beta value for steering angle and acceleration to be used in Beta distribution
+        ba_sa = torch.exp(self.final_dense_sa(lstm_output))
+        ba_sa = 1 + ba_sa
+        ba_acc = torch.exp(self.final_dense_acc(lstm_output))
+        ba_acc = 1 + ba_acc
+        return ba_sa, ba_acc
+
+
+class QValueApproximation(nn.Module):
+    def __init__(self, state_size, joined_actions_size):
+        super().__init__()
+        self.fc1 = nn.Linear(in_features=state_size + joined_actions_size, out_features=64)
+        self.fc2 = nn.Linear(in_features=64, out_features=32)
+        self.fc3 = nn.Linear(in_features=32, out_features=1)
+
+    def forward(self, joined_state_action):
+        x = Fu.relu(self.fc1(joined_state_action))
+        x = Fu.relu(self.fc2(x))
+        x = Fu.tanh(self.fc3(x))
         return x

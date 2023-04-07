@@ -1,31 +1,14 @@
-from metadrive import MultiAgentIntersectionEnv
-from env.mock import MultiAgentEnv
-import numpy as np
-import torch
+from env.multi_agents import MultiAgentsEnv
 from torchsummary import summary
-from torchviz import make_dot
-import torch.nn as nn
-import torch.optim as optim
-from collections import OrderedDict
+import torch
+
+from model.indi_actor_critics import IndividualActorCritics
 from model.network import Policy
+from model.agent import CentralPPOAgents
+import numpy as np
+import matplotlib.pyplot as plt
 
-NUM_AGENTS = 4
-
-env = MultiAgentIntersectionEnv(config={
-    "num_agents": NUM_AGENTS,
-    "use_render": False,
-    "manual_control": False,
-    "map_config": {
-        "lane_num": 1
-    },
-    "vehicle_config": {
-        "show_lidar": True,
-        "image_source": "rgb_camera",
-        "rgb_camera": (84, 84)
-    },
-    "show_fps": True,
-    "image_observation": True,
-})
+env = MultiAgentsEnv(num_agents=8)
 obs = env.reset()
 #
 # mock = MultiAgentEnv(NUM_AGENTS)
@@ -41,22 +24,44 @@ obs = env.reset()
 # # print("Real", obs_size)
 # print("Real Reward", action_size)
 
-print("Sate Length: ", obs['agent0']['state'].shape)
-print("Image Shape: ", obs['agent0']['image'].shape)
+# print("Sate Length: ", obs['agent3']['state'].shape)
+# print("Image Shape: ", obs['agent4']['image'][0, 0, :, 0])
 
-state = torch.from_numpy(obs['agent0']['state'])
+state = torch.from_numpy(obs['agent3']['state'])
 sample_image = obs['agent0']['image']
-torch_tensor = torch.from_numpy(sample_image)
-torch_tensor = torch_tensor.permute(3, 2, 0, 1)
+sample_image = sample_image[:, :, :, -1]
+print(sample_image.shape)
 
-print("Image Shape: ", torch_tensor.shape)
+# # swap the last two dimensions
+# sample_image = np.transpose(sample_image, (0, 1, 3, 2))
+#
+# print("Image Shape: ", sample_image.shape)
+#
+# # select the first element of the last dimension
+# data_3d = sample_image[..., 0]
 
-model = Policy(state_size=19, image_width=84, image_height=84, action_size=2)
+# plot the data along the first dimension (height)
+# plt.imshow(sample_image[:, :, :, -1])
+# plt.show()
 
-result = model.forward(x_img=torch_tensor, x_vec=state)
-print(result)
 
-summary(model, [torch_tensor, state])
+# torch_tensor = torch.from_numpy(sample_image)
+# torch_tensor = torch_tensor.permute(3, 2, 0, 1)
+# torch_tensor = torch.squeeze(torch_tensor, dim=0)
+
+# print("Image Shape: ", torch_tensor.shape)
+#
+# print("Action: ", env.action_space.sample())
+# model = Policy(state_size=19)
+#
+# ba_sa, ba_acc = model.forward(x_img=torch_tensor, x_vec=state)
+# print(ba_sa[0])
+
+central_agent = IndividualActorCritics(state_size=19)
+# action = central_agent.actor(agent_name='agent0', state=obs['agent0']['state']),
+# print(action)
+
+summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0, 1)])
 # Define the hyperparameters
 # learning_rate = 0.01
 # gamma = 0.99
@@ -171,7 +176,7 @@ summary(model, [torch_tensor, state])
 #
 # d = {}
 # d["__all__"] = False
-# for i in range(1000):
+# for t in range(1000):
 #     if d["__all__"]:
 #         #frames.append(frame)
 #         continue
@@ -180,7 +185,9 @@ summary(model, [torch_tensor, state])
 #         a[-1] = 1.0
 #     o, r, d, i = env.step(action)
 #     # print(r)
+#     print("step: ", t)
 #     frame = env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
+#
 #     # frames.append(frame)
 # env.close()
 #
