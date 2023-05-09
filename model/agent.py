@@ -59,9 +59,11 @@ def get_joined_action_state(actions, state):
     concat_states = np.concatenate(arrays)
     joined_actions_states = np.concatenate((concat_actions, concat_states))
     joined_actions_states = torch.from_numpy(joined_actions_states)
-    if joined_actions_states.shape[0] < 168:
-        padding = (0, 168 - joined_actions_states.shape[0])
-        joined_actions_states = torch.nn.functional.pad(joined_actions_states, padding)
+    # joined_actions_states = torch.DoubleTensor(joined_actions_states)
+    # print(joined_actions_states.double())
+    # if joined_actions_states.shape[0] < 168:
+    #     padding = (0, 168 - joined_actions_states.shape[0])
+    #     joined_actions_states = torch.nn.functional.pad(joined_actions_states, padding)
     return joined_actions_states
 
 
@@ -204,11 +206,12 @@ class CentralPPOAgents(nn.Module):
             logprobs[key] = logprob
             joined_states[key] = states[key]['state']
             # state roll out buffer
-            self.rollout_buffer.add_actions(torch.FloatTensor(action))
+            self.rollout_buffer.add_actions(torch.DoubleTensor(action))
             self.rollout_buffer.logprobs.append(torch.Tensor(logprob))
 
         joined_actions_states = get_joined_action_state(actions, states)
         with torch.no_grad():
+            # print(joined_actions_states)
             state_action_values = self.central_policy.critic(joined_actions_states)
 
         # print("state action values: ", state_action_values)
@@ -223,6 +226,10 @@ class CentralPPOAgents(nn.Module):
         # Monte Carlo estimate of state rewards:
         rewards = []
         discounted_reward = 0
+        print("Reward Length")
+        print(len(self.rollout_buffer.rewards))
+        print("Termination Length")
+        print(len(self.rollout_buffer.is_terminated))
         for reward, is_terminated in zip(reversed(self.rollout_buffer.rewards),
                                          reversed(self.rollout_buffer.is_terminated)):
             if is_terminated:

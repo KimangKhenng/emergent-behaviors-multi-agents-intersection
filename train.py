@@ -178,7 +178,11 @@ def train():
 
             # update PPO agent
             if time_step % 100 == 0:
-                print("updating PPO agent")
+                # print("updating PPO agent")
+                # print("Termination Size")
+                # print(len(ppo_agent.rollout_buffer.is_terminated))
+                # print("Reward Size")
+                # print(len(ppo_agent.rollout_buffer.rewards))
                 ppo_agent.update()
 
             # log in logging file
