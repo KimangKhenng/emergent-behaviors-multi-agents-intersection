@@ -26,7 +26,7 @@ class IndividualActorCritics(BaseActorCritics):
         acc_logprobs = acc_dist.log_prob((acc_action + 1.0)/2.0)
         logprobls = (sa_logprobs, acc_logprobs)
 
-        return np.array([sa_action_tr.detach().numpy(), acc_action_tr.detach().numpy()]), logprobls
+        return np.array([sa_action.detach().numpy(), acc_action.detach().numpy()]), logprobls
 
     def evaluate(self, state, front_view, action):
         ba_sa, ba_acc = self.actor(state, front_view)
