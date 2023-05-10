@@ -1,4 +1,4 @@
-from env.multi_agents import MultiAgentsEnv
+from envs.multi_agents import MultiAgentsEnv
 from torchsummary import summary
 import torch
 
@@ -19,7 +19,7 @@ obs = env.reset()
 # print("Mock Action", mock.action_space.sample())
 
 # obs_size = len(obs['agent0'])
-# action_size = env.action_space.sample()
+# action_size = envs.action_space.sample()
 #
 # # print("Real", obs_size)
 # print("Real Reward", action_size)
@@ -51,7 +51,7 @@ print(sample_image.shape)
 
 # print("Image Shape: ", torch_tensor.shape)
 #
-# print("Action: ", env.action_space.sample())
+# print("Action: ", envs.action_space.sample())
 # model = Policy(state_size=19)
 #
 # ba_sa, ba_acc = model.forward(x_img=torch_tensor, x_vec=state)
@@ -71,14 +71,14 @@ summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0
 # policies = []
 # actions = []
 #
-# for i in range(env.num_agents):
-#     # policies.append(np.random.rand(env.observation_space['agent{}'.format(i)].shape[0],
-#     #                                env.action_space['agent{}'.format(i)].shape[0]))
-#     # actions.append(np.zeros(env.action_space['agent{}'.format(i)].shape[0]))
-#     policy = Policy(env.observation_space['agent{}'.format(i)].shape[0], env.action_space['agent{}'.format(i)].shape[0])
+# for i in range(envs.num_agents):
+#     # policies.append(np.random.rand(envs.observation_space['agent{}'.format(i)].shape[0],
+#     #                                envs.action_space['agent{}'.format(i)].shape[0]))
+#     # actions.append(np.zeros(envs.action_space['agent{}'.format(i)].shape[0]))
+#     policy = Policy(envs.observation_space['agent{}'.format(i)].shape[0], envs.action_space['agent{}'.format(i)].shape[0])
 #     optimizer = optim.Adam(policy.parameters(), lr=learning_rate)
 #     policies.append(policy)
-#     actions.append(np.zeros(env.action_space['agent{}'.format(i)].shape[0]))
+#     actions.append(np.zeros(envs.action_space['agent{}'.format(i)].shape[0]))
 #
 #
 # # Define the PG update function
@@ -116,12 +116,12 @@ summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0
 #
 # for episode in range(num_episodes):
 #     # Reset the environment and get the initial state
-#     state = env.reset()
+#     state = envs.reset()
 #
 #     # Collect data for each agent in the episode
-#     episode_states = [[] for _ in range(env.num_agents)]
-#     episode_actions = [[] for _ in range(env.num_agents)]
-#     episode_rewards = [[] for _ in range(env.num_agents)]
+#     episode_states = [[] for _ in range(envs.num_agents)]
+#     episode_actions = [[] for _ in range(envs.num_agents)]
+#     episode_rewards = [[] for _ in range(envs.num_agents)]
 #     total_reward = 0
 #     # done = False
 #     d = {}
@@ -129,7 +129,7 @@ summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0
 #     while not d['__all__']:
 #         # Get the actions for each agent from their policy
 #         final_actions = {}
-#         # for i in range(env.num_agents):
+#         # for i in range(envs.num_agents):
 #         #     if 'agent{}'.format(i) in reward_dict:
 #         #         state_tensor = torch.tensor(state['agent{}'.format(i)], dtype=torch.float)
 #         #         action_tensor = policies[i](state_tensor)
@@ -141,18 +141,18 @@ summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0
 #             actions[index] = action_tensor.detach().numpy()
 #             final_actions[key] = actions[index]
 #             # Step the environment with the actions
-#             # final_actions = OrderedDict([('agent{}'.format(i), actions[i]) for i in range(env.num_agents)])
+#             # final_actions = OrderedDict([('agent{}'.format(i), actions[i]) for i in range(envs.num_agents)])
 #
 #         # print(final_actions)
 #         # for a in final_actions.values():
 #         #     a[-1] = 1.0
 #         # print(final_actions)
-#         next_state, reward_dict, d, info_dict = env.step(final_actions)
+#         next_state, reward_dict, d, info_dict = envs.step(final_actions)
 #         # print(reward_dict)
-#         # env.render(mode="top_down", film_size=(500, 500), track_target_vehicle=False, screen_size=(500, 500))
+#         # envs.render(mode="top_down", film_size=(500, 500), track_target_vehicle=False, screen_size=(500, 500))
 #
 #         # Collect the data for each agent
-#         for i in range(env.num_agents):
+#         for i in range(envs.num_agents):
 #             if 'agent{}'.format(i) in reward_dict:
 #                 episode_states[i].append(state['agent{}'.format(i)])
 #                 episode_actions[i].append(actions[i])
@@ -165,7 +165,7 @@ summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0
 #         state = next_state
 #
 #     # Update the policies for each agent
-#     for i in range(env.num_agents):
+#     for i in range(envs.num_agents):
 #         if episode_rewards[i]:
 #             pg_update(episode_states[i], episode_actions[i], episode_rewards[i], policies[i])
 #
@@ -180,16 +180,16 @@ summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0
 #     if d["__all__"]:
 #         #frames.append(frame)
 #         continue
-#     action = env.action_space.sample()
+#     action = envs.action_space.sample()
 #     for a in action.values():
 #         a[-1] = 1.0
-#     o, r, d, i = env.step(action)
+#     o, r, d, i = envs.step(action)
 #     # print(r)
 #     print("step: ", t)
-#     frame = env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
+#     frame = envs.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
 #
 #     # frames.append(frame)
-# env.close()
+# envs.close()
 #
 # # render image
 # print("\nGenerate gif...")

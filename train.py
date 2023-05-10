@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from env.multi_agents import MultiAgentsEnv
+from envs.multi_agents import MultiAgentsEnv
 import os
 import torch
 import numpy as np
@@ -25,7 +25,7 @@ def train():
     action_std_decay_rate = 0.05  # linearly decay action_std (action_std = action_std - action_std_decay_rate)
     min_action_std = 0.1  # minimum action_std (stop decay after action_std <= min_action_std)
     action_std_decay_freq = int(2.5e5)  # action_std decay frequency (in num timesteps)
-    num_agents = 8  # number of agents in the environment
+    num_agents = 4  # number of agents in the environment
     #####################################################
     ################ PPO hyperparameters ################
     update_timestep = max_ep_len * 2  # update policy every n timesteps
@@ -157,12 +157,12 @@ def train():
         for t in range(1, max_ep_len + 1):
             actions = ppo_agent.select_actions(obs)
             # print("actions : ", actions)
-            # actions = env.action_space.sample()
+            # actions = envs.action_space.sample()
             # print("Action : ", actions)
             obs, r, d, i = env.step(actions)
             # print("rewards : ", r)
             # print("done : ", d)
-            # env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
+            env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
             # print(d)
 
             # saving reward and is_terminals
@@ -177,7 +177,7 @@ def train():
             print("time_step : ", time_step)
 
             # update PPO agent
-            if time_step % 100 == 0:
+            if time_step % 1000 == 0:
                 print("updating PPO agent")
                 ppo_agent.update()
 

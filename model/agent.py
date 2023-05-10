@@ -59,8 +59,9 @@ def get_joined_action_state(actions, state):
     concat_states = np.concatenate(arrays)
     joined_actions_states = np.concatenate((concat_actions, concat_states))
     joined_actions_states = torch.from_numpy(joined_actions_states)
-    if joined_actions_states.shape[0] < 168:
-        padding = (0, 168 - joined_actions_states.shape[0])
+    # print("joined_actions_states.shape: ", joined_actions_states.shape)
+    if joined_actions_states.shape[0] < 84:
+        padding = (0, 84 - joined_actions_states.shape[0])
         joined_actions_states = torch.nn.functional.pad(joined_actions_states, padding)
     return joined_actions_states
 
@@ -187,6 +188,9 @@ class CentralPPOAgents(nn.Module):
                 state=state,
                 front_view=front_view,
             )
+            # action = [np.float32(item) for item in action]
+            # print(action, type(action[0]))
+            # print(mapped_action, type(mapped_action[0]))
         self.rollout_buffer.states.append(state)
         self.rollout_buffer.front_views.append(front_view)
         return action, logprobs
@@ -217,6 +221,9 @@ class CentralPPOAgents(nn.Module):
         for _ in states.keys():
             self.rollout_buffer.state_action_values.append(state_action_values)
             self.rollout_buffer.joined_action_state.append(joined_actions_states)
+
+        for a in actions.values():
+            a[-1] = 1.0
         return actions
 
     def update(self):
@@ -255,6 +262,7 @@ class CentralPPOAgents(nn.Module):
 
         # Optimize policy for K epochs
         for _ in range(5):
+            print("Performing Optimization")
             # Evaluating old actions and values
             # print("Old Front View: ", old_front_view.shape)
             logprobs, dist_entropy, action_state_value = self.central_policy.evaluate(
