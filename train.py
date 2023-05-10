@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from envs.multi_agents import MultiAgentsEnv
+from envs.multi_agents import MultiAgentsEnv, STATE_DIM
 import os
 import torch
 import numpy as np
@@ -30,7 +30,8 @@ def train():
     ################ PPO hyperparameters ################
     update_timestep = max_ep_len * 2  # update policy every n timesteps
     # update_timestep = 100  # update policy every n timesteps
-    K_epochs = 80  # update policy for K epochs in one PPO update
+    K_epochs = 2  # update policy for K epochs in one PPO update
+    optim_batch_size = 128  # training batch size
 
     eps_clip = 0.2  # clip parameter for PPO
     gamma = 0.99  # discount factor
@@ -117,13 +118,14 @@ def train():
     ################# training procedure ################
 
     # initialize a PPO agent
-    ppo_agent = CentralPPOAgents(state_size=19,
+    ppo_agent = CentralPPOAgents(state_size=STATE_DIM,
                                  joined_actions_size=num_agents * 2,
                                  num_agents=num_agents,
                                  lr_actor=lr_actor,
                                  lr_critic=lr_critic,
                                  gamma=gamma,
                                  k_epochs=K_epochs,
+                                 optim_batch_size=optim_batch_size,
                                  eps_clip=eps_clip)
 
     # track total training time
@@ -156,18 +158,22 @@ def train():
 
         for t in range(1, max_ep_len + 1):
             actions = ppo_agent.select_actions(obs)
+            print("State Size: ", len(ppo_agent.rollout_buffer.states))
             # print("actions : ", actions)
             # actions = envs.action_space.sample()
             # print("Action : ", actions)
             obs, r, d, i = env.step(actions)
+            # print(len(obs))
             # print("rewards : ", r)
             # print("done : ", d)
-            env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
+            # env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
             # print(d)
 
             # saving reward and is_terminals
             ppo_agent.rollout_buffer.add_reward(r, num_agents)
             ppo_agent.rollout_buffer.add_terminated(d, num_agents)
+            print("Reward Length: ", len(ppo_agent.rollout_buffer.rewards))
+            # print("State Length: ", len(ppo_agent.rollout_buffer.states))
             # ppo_agent.rollout_buffer.add_next_state_action_values(obs)
             #
             time_step += 1
@@ -177,9 +183,10 @@ def train():
             print("time_step : ", time_step)
 
             # update PPO agent
-            if time_step % 1000 == 0:
+            if time_step % 100 == 0:
                 print("updating PPO agent")
                 ppo_agent.update()
+                obs = env.reset()
 
             # log in logging file
             if time_step % log_freq == 0:

@@ -1,3 +1,4 @@
+import math
 from collections import OrderedDict
 
 import numpy as np
@@ -84,25 +85,27 @@ class RolloutBuffer:
         self.joined_action_state.append(joined_actions_states)
 
     def add_reward(self, rewards_dict, num_agent):
-        # if len(rewards_dict) != num_agent:
-        #     all_agent_names = [f'agent{i}' for i in range(num_agent)]
-        #     for agent_name in all_agent_names:
-        #         if agent_name not in rewards_dict:
-        #             rewards_dict[agent_name] = -5
+        if len(rewards_dict) != num_agent:
+            all_agent_names = [f'agent{i}' for i in range(num_agent)]
+            for agent_name in all_agent_names:
+                if agent_name not in rewards_dict.keys():
+                    rewards_dict[agent_name] = -10
         # Extract the reward values and maintain chronological order
         # rewards_list = [rewards_dict[f'agent{i}'] for i in range(len(rewards_dict))]
+        print(rewards_dict)
         rewards_list = [i for i in rewards_dict.values()]
         self.rewards.extend(rewards_list)
 
     def add_terminated(self, terminated_dict, num_agent):
-        # if len(terminated_dict) - 1 != num_agent:
-        #     all_agent_names = [f'agent{i}' for i in range(num_agent)]
-        #     for agent_name in all_agent_names:
-        #         if agent_name not in terminated_dict:
-        #             terminated_dict[agent_name] = True
+        if len(terminated_dict) - 1 != num_agent:
+            all_agent_names = [f'agent{i}' for i in range(num_agent)]
+            for agent_name in all_agent_names:
+                if agent_name not in terminated_dict.keys():
+                    terminated_dict[agent_name] = True
         # Extract the done values and maintain chronological order
         # print(terminated_dict)
         # terminated_list = [terminated_dict[f'agent{i}'] for i in range(len(terminated_dict) - 1)]
+        print(terminated_dict)
         terminated_list = [i for i in terminated_dict.values()]
         self.is_terminated.extend(terminated_list)
 
@@ -129,6 +132,7 @@ class RolloutBuffer:
     def clear(self):
         del self.actions[:]
         del self.states[:]
+        del self.front_views[:]
         del self.rewards[:]
         del self.state_action_values[:]
         del self.joined_action_state[:]
@@ -146,13 +150,15 @@ class CentralPPOAgents(nn.Module):
             lr_actor=0.1,
             lr_critic=0.1,
             gamma=0.99,
-            k_epochs=80,
+            k_epochs=10,
+            optim_batch_size=64,
             eps_clip=0.2):
         # Initialize the network and optimizer
         super().__init__()
         # Central Policy for learning
         self.num_agents = num_agents
         self.K_epochs = k_epochs
+        self.optim_batch_size = optim_batch_size
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.central_policy = CentralActorCritics(state_size=state_size, num_agents=num_agents)
@@ -201,6 +207,8 @@ class CentralPPOAgents(nn.Module):
         logprobs = OrderedDict()
         joined_states = OrderedDict()
         # Loop through all agents by key
+        print("Agents")
+        print(states.keys())
         for key in states.keys():
             # Select action for each agent
             action, logprob = self.select_action(key, states[key])
@@ -263,50 +271,66 @@ class CentralPPOAgents(nn.Module):
         print("old_joined_actions_states: ", old_joined_actions_states.shape)
         # print("Old Value state: ", old_state_values.shape)
         # calculate advantages
-        advantages = rewards.detach() - old_state_values.detach()
+        # advantages = rewards.detach() - old_state_values.detach()
 
+        optim_iter_num = int(math.ceil(old_states.shape[0] / self.optim_batch_size))
+        print("Optim Iter Num: ", optim_iter_num)
         # Optimize policy for K epochs
-        for _ in range(5):
-            print("Performing Optimization")
-            # Evaluating old actions and values
-            # print("Old Front View: ", old_front_view.shape)
-            logprobs, dist_entropy, action_state_value = self.central_policy.evaluate(
-                old_states,
-                old_front_view,
-                old_actions,
-                old_joined_actions_states
-            )
+        for step in range(self.K_epochs):
+            print("Performing Optimization: ", step)
+            print("Slicing Batch")
+            for i in range(optim_iter_num):
+                print("Batch: ", i)
+                ind = slice(i * self.optim_batch_size, min((i + 1) * self.optim_batch_size, old_states.shape[0]))
 
-            # match state_values tensor dimensions with rewards tensor
-            action_state_value = torch.squeeze(action_state_value)
+                ind_action = slice(i * self.optim_batch_size*2, min((i + 1) * self.optim_batch_size*2, old_actions.shape[0]))
 
-            # Finding the ratio (pi_theta / pi_theta__old)
-            # print("logprobs: ", logprobs.shape)
-            # print("old_logprobs: ", old_logprobs.shape)
-            ratios = torch.exp(logprobs - old_logprobs.detach())
+                old_states_batch, old_front_view_batch, old_actions_batch, old_joined_actions_states_batch, rewards_batch, old_state_values_batch, old_logprobs_batch = \
+                    old_states[ind], old_front_view[ind], old_actions[ind_action], old_joined_actions_states[ind], rewards[ind], old_state_values[ind], old_logprobs[ind]
+                # Evaluating old actions and values
+                # print("Old Front View: ", old_front_view.shape)
+                # print("Old Actions Batched: ", old_actions_batch.shape)
+                # print("Old Front View Batched: ", old_front_view_batch.shape)
+                # print("Old States Batched: ", old_states_batch.shape)
+                # print("Old Joined Actions States Batched: ", old_joined_actions_states_batch.shape)
+                logprobs, dist_entropy, action_state_value = self.central_policy.evaluate(
+                    old_states_batch,
+                    old_front_view_batch,
+                    old_actions_batch,
+                    old_joined_actions_states_batch
+                )
+                # print("action_state_value: ", action_state_value.shape)
 
-            # Finding Surrogate Loss
+                # match state_values tensor dimensions with rewards tensor
+                action_state_value = torch.squeeze(action_state_value)
+                advantages = rewards_batch.detach() + action_state_value.detach() - old_state_values_batch.detach()
 
-            # print("ratios: ", ratios.shape)
-            advantages = advantages.unsqueeze(1)
-            print("advantages: ", advantages.shape)
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+                # Finding the ratio (pi_theta / pi_theta__old)
+                # print("logprobs: ", logprobs.shape)
+                # print("old_logprobs: ", old_logprobs.shape)
+                ratios = torch.exp(logprobs - old_logprobs_batch.detach())
 
-            # print("surr1: ", surr1.shape)
-            # print("surr2: ", surr2.shape)
-            # print("action_state_value: ", action_state_value.shape)
-            # print("rewards: ", rewards.shape)
-            # print("dist_entropy: ", dist_entropy)
-            # final loss of clipped objective PPO
-            loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(action_state_value, rewards) - 0.01 * dist_entropy
+                # Finding Surrogate Loss
 
-            # take gradient step
-            self.optimizer.zero_grad()
-            loss.mean().backward()
-            self.optimizer.step()
+                # print("ratios: ", ratios.shape)
+                advantages = advantages.unsqueeze(1)
+                # print("advantages: ", advantages.shape)
+                surr1 = ratios * advantages
+                surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
 
-            advantages = advantages.squeeze(1)
+                # print("surr1: ", surr1.shape)
+                # print("surr2: ", surr2.shape)
+                # print("action_state_value: ", action_state_value.shape)
+                # print("rewards: ", rewards.shape)
+                # print("dist_entropy: ", dist_entropy)
+                # final loss of clipped objective PPO
+                loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(action_state_value, rewards_batch) - 0.01 * dist_entropy
+
+                # take gradient step
+                self.optimizer.zero_grad()
+                loss.mean().backward()
+                self.optimizer.step()
+                advantages = advantages.squeeze(1)
 
         # Copy new weights into old policy
         for policy in self.decentralized_policies.values():

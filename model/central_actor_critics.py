@@ -38,11 +38,11 @@ class CentralActorCritics(BaseActorCritics):
         sa_dist = Beta(ba_sa[:, 0], ba_sa[:, 1])
         acc_dist = Beta(ba_acc[:, 0], ba_acc[:, 1])
 
-        sa_logprobs = sa_dist.log_prob(actions[:, 0])
+        sa_logprobs = sa_dist.log_prob((actions[:, 0] + 1.0)/2)
         sa_dist_entropy = sa_dist.entropy()
         # print("SA logprobs: ", sa_logprobs)
 
-        acc_logprobs = acc_dist.log_prob(actions[:, 1])
+        acc_logprobs = acc_dist.log_prob((actions[:, 1] + 1.0)/2)
         acc_dist_entropy = acc_dist.entropy()
 
         action_state_value = self.critic(joined_state_action)

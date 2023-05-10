@@ -44,7 +44,7 @@
 # Params size (MB): 7.09
 # Estimated Total Size (MB): 7.53
 # ==========================================================================================
-from envs.multi_agents import MultiAgentsEnv
+from envs.multi_agents import MultiAgentsEnv, STATE_DIM
 from torchsummary import summary
 import torch
 from model.indi_actor_critics import IndividualActorCritics
@@ -52,8 +52,8 @@ from model.indi_actor_critics import IndividualActorCritics
 if __name__ == '__main__':
     env = MultiAgentsEnv(num_agents=8)
     obs = env.reset()
-    state = torch.from_numpy(obs['agent3']['state'])
+    state = torch.from_numpy(obs['agent0']['state'])
     sample_image = obs['agent0']['image']
     sample_image = sample_image[:, :, :, -1]
-    central_agent = IndividualActorCritics(state_size=19)
+    central_agent = IndividualActorCritics(state_size=STATE_DIM)
     summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0, 1)])

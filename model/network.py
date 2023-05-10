@@ -4,11 +4,13 @@ import torch.nn as nn
 import torch.nn.functional as Fu
 from torch.distributions import Beta
 
+from envs.multi_agents import STATE_DIM
+
 
 # Define hybrid policy architecture
 class Policy(nn.Module):
 
-    def __init__(self, state_size=19, vocab_size=32):
+    def __init__(self, state_size=STATE_DIM, vocab_size=32):
         super(Policy, self).__init__()
         # Process state information
         self.fc1 = nn.Linear(in_features=state_size, out_features=64)
@@ -42,30 +44,32 @@ class Policy(nn.Module):
         self.embedding_dim = 7680 + 32
 
         #  Embedding layer
-        self.embedding = nn.Embedding(vocab_size, 256)
+        self.embedding = nn.Embedding(vocab_size, 64)
 
-        # Multi-head attention layer
-        self.self_attn = nn.MultiheadAttention(256, num_heads=8, dropout=0.1)
+        # # Multi-head attention layer
+        self.self_attn = nn.MultiheadAttention(64, num_heads=8, dropout=0.1)
+        # Linear layer for attention
+        # self.linear_attn = nn.Linear(64, 64)
 
         # LSTM layer
-        self.lstm = nn.LSTM(7680 + 32, hidden_size=32, num_layers=1, batch_first=True)
+        self.lstm = nn.LSTM(3200 + 32, hidden_size=8, num_layers=1, batch_first=True)
 
         # Final dense layer for steering angle
         self.final_dense_sa = nn.Sequential(
-            nn.Linear(in_features=1792, out_features=200),
+            nn.Linear(in_features=64, out_features=32),
             nn.ReLU(),
-            nn.Linear(in_features=200, out_features=100),
-            nn.ReLU(),
-            nn.Linear(in_features=100, out_features=2),
+            nn.Linear(in_features=32, out_features=2),
+            # nn.ReLU(),
+            # nn.Linear(in_features=100, out_features=2),
         )
 
         # Final dense layer for acceleration
         self.final_dense_acc = nn.Sequential(
-            nn.Linear(in_features=1792, out_features=200),
+            nn.Linear(in_features=64, out_features=32),
             nn.ReLU(),
-            nn.Linear(in_features=200, out_features=100),
-            nn.ReLU(),
-            nn.Linear(in_features=100, out_features=2),
+            nn.Linear(in_features=32, out_features=2),
+            # nn.ReLU(),
+            # nn.Linear(in_features=100, out_features=2),
         )
 
     def forward(self, x_vec, x_img):
