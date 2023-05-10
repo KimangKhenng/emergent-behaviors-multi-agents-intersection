@@ -1,3 +1,4 @@
+import numpy
 import numpy as np
 from torch.distributions import Beta
 
@@ -18,14 +19,14 @@ class IndividualActorCritics(BaseActorCritics):
         sa_dist = Beta(ba_sa[0], ba_sa[1])
         acc_dist = Beta(ba_acc[0], ba_acc[1])
 
-        sa_action = 2.0*sa_dist.sample() - 1
-        acc_action = 2.0*acc_dist.sample() - 1
+        sa_action = 2.0*sa_dist.sample() - 1.0
+        acc_action = 2.0*acc_dist.sample() - 1.0
 
         sa_logprobs = sa_dist.log_prob((sa_action + 1.0)/2.0)
         acc_logprobs = acc_dist.log_prob((acc_action + 1.0)/2.0)
         logprobls = (sa_logprobs, acc_logprobs)
 
-        return np.array([sa_action.detach().numpy(), acc_action.detach().numpy()]), logprobls
+        return np.array([sa_action_tr.detach().numpy(), acc_action_tr.detach().numpy()]), logprobls
 
     def evaluate(self, state, front_view, action):
         ba_sa, ba_acc = self.actor(state, front_view)
