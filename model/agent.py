@@ -89,7 +89,7 @@ class RolloutBuffer:
             all_agent_names = [f'agent{i}' for i in range(num_agent)]
             for agent_name in all_agent_names:
                 if agent_name not in rewards_dict.keys():
-                    rewards_dict[agent_name] = -10
+                    rewards_dict[agent_name] = 0
         # Extract the reward values and maintain chronological order
         # rewards_list = [rewards_dict[f'agent{i}'] for i in range(len(rewards_dict))]
         # print(rewards_dict)

@@ -21,16 +21,12 @@ def train():
     log_freq = max_ep_len * 2  # log avg reward in the interval (in num timesteps)
     save_model_freq = int(1e5)  # save model frequency (in num timesteps)
 
-    action_std = 0.6  # starting std for action distribution (Multivariate Normal)
-    action_std_decay_rate = 0.05  # linearly decay action_std (action_std = action_std - action_std_decay_rate)
-    min_action_std = 0.1  # minimum action_std (stop decay after action_std <= min_action_std)
-    action_std_decay_freq = int(2.5e5)  # action_std decay frequency (in num timesteps)
     num_agents = 4  # number of agents in the environment
     #####################################################
     ################ PPO hyperparameters ################
     update_timestep = max_ep_len * 1  # update policy every n timesteps
     # update_timestep = 100  # update policy every n timesteps
-    K_epochs = 5  # update policy for K epochs in one PPO update
+    K_epochs = 1  # update policy for K epochs in one PPO update
     optim_batch_size = 128  # training batch size
 
     eps_clip = 0.2  # clip parameter for PPO
@@ -93,10 +89,6 @@ def train():
     print("Initializing a continuous action space policy")
     print("--------------------------------------------------------------------------------------------")
     print("number of agents : ", num_agents)
-    print("starting std of action distribution : ", action_std)
-    print("decay rate of std of action distribution : ", action_std_decay_rate)
-    print("minimum std of action distribution : ", min_action_std)
-    print("decay frequency of std of action distribution : " + str(action_std_decay_freq) + " timesteps")
     print("--------------------------------------------------------------------------------------------")
     print("PPO update frequency : " + str(update_timestep) + " timesteps")
     print("PPO K epochs : ", K_epochs)
@@ -202,7 +194,7 @@ def train():
                 log_avg_reward = round(log_avg_reward, 4)
                 success_rate = total_successes / len(i)
 
-                log_f.write('{},{},{},{}\n'.format(i_episode, time_step, log_avg_reward, success_rate))
+                log_f.write('{},{},{}\n'.format(i_episode, time_step, log_avg_reward))
                 log_f.flush()
 
                 log_running_reward = 0
