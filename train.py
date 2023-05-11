@@ -15,7 +15,7 @@ def train():
     ####### initialize environment hyperparameters ######
     env_name = "MultiAgentsIntersection-8"
     max_ep_len = 1000  # max timesteps in one episode
-    max_training_timesteps = int(3e6)  # break training loop if timeteps > max_training_timesteps
+    max_training_timesteps = int(1e5)  # break training loop if timeteps > max_training_timesteps
 
     print_freq = max_ep_len * 10  # print avg reward in the interval (in num timesteps)
     log_freq = max_ep_len * 2  # log avg reward in the interval (in num timesteps)
@@ -28,9 +28,9 @@ def train():
     num_agents = 4  # number of agents in the environment
     #####################################################
     ################ PPO hyperparameters ################
-    update_timestep = max_ep_len * 2  # update policy every n timesteps
+    update_timestep = max_ep_len * 1  # update policy every n timesteps
     # update_timestep = 100  # update policy every n timesteps
-    K_epochs = 2  # update policy for K epochs in one PPO update
+    K_epochs = 5  # update policy for K epochs in one PPO update
     optim_batch_size = 128  # training batch size
 
     eps_clip = 0.2  # clip parameter for PPO
@@ -147,18 +147,20 @@ def train():
 
     time_step = 0
     i_episode = 0
+    success_rates = []
 
     # training loop
     while time_step <= max_training_timesteps:
 
         obs = env.reset()
         current_ep_reward = 0
+        total_successes = 0
         d = {}
         d["__all__"] = False
 
         for t in range(1, max_ep_len + 1):
             actions = ppo_agent.select_actions(obs)
-            print("State Size: ", len(ppo_agent.rollout_buffer.states))
+            # print("State Size: ", len(ppo_agent.rollout_buffer.states))
             # print("actions : ", actions)
             # actions = envs.action_space.sample()
             # print("Action : ", actions)
@@ -172,29 +174,35 @@ def train():
             # saving reward and is_terminals
             ppo_agent.rollout_buffer.add_reward(r, num_agents)
             ppo_agent.rollout_buffer.add_terminated(d, num_agents)
-            print("Reward Length: ", len(ppo_agent.rollout_buffer.rewards))
+            # print("Reward Length: ", len(ppo_agent.rollout_buffer.rewards))
             # print("State Length: ", len(ppo_agent.rollout_buffer.states))
             # ppo_agent.rollout_buffer.add_next_state_action_values(obs)
             #
             time_step += 1
             current_ep_reward += sum(r.values())
-            writer.add_scalar("time/reward", time_step, current_ep_reward)
-            # print("current_ep_reward : ", current_ep_reward)
+            # writer.add_scalar("time/reward", time_step, current_ep_reward)
+            print("current_ep_reward : ", current_ep_reward)
             print("time_step : ", time_step)
+            for agent_name, info in i.items():
+                if info['arrive_dest']:
+                    total_successes += 1
+
+            # success_rates.append(success_rate)
 
             # update PPO agent
-            if time_step % 100 == 0:
+            if time_step % update_timestep == 0:
                 print("updating PPO agent")
                 ppo_agent.update()
-                obs = env.reset()
+                # obs = env.reset()
 
             # log in logging file
             if time_step % log_freq == 0:
                 # log average reward till last episode
                 log_avg_reward = log_running_reward / log_running_episodes
                 log_avg_reward = round(log_avg_reward, 4)
+                success_rate = total_successes / len(i)
 
-                log_f.write('{},{},{}\n'.format(i_episode, time_step, log_avg_reward))
+                log_f.write('{},{},{},{}\n'.format(i_episode, time_step, log_avg_reward, success_rate))
                 log_f.flush()
 
                 log_running_reward = 0

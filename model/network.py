@@ -30,6 +30,9 @@ class Policy(nn.Module):
             nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            # nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, padding=1),
+            # nn.ReLU(),
+            # nn.MaxPool2d(kernel_size=2, stride=2),
             # nn.Flatten(start_dim=0)
         )
 
@@ -40,8 +43,6 @@ class Policy(nn.Module):
 
         # # Batch normalization layers
         # self.bn1 = nn.BatchNorm1d(23040)
-
-        self.embedding_dim = 7680 + 32
 
         #  Embedding layer
         self.embedding = nn.Embedding(vocab_size, 64)
@@ -133,6 +134,83 @@ class Policy(nn.Module):
         ba_sa = torch.exp(self.final_dense_sa(lstm_output))
         ba_sa = 1 + ba_sa
         ba_acc = torch.exp(self.final_dense_acc(lstm_output))
+        ba_acc = 1 + ba_acc
+        return ba_sa, ba_acc
+
+
+class LSTMPolicy(nn.Module):
+    def __init__(self, state_size=STATE_DIM):
+        super(LSTMPolicy, self).__init__()
+        # Process state information
+        self.fc1 = nn.Linear(in_features=state_size, out_features=64)
+        self.fc2 = nn.Linear(in_features=64, out_features=32)
+
+        # Process front view image
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            # nn.Flatten(start_dim=0)
+        )
+
+        # 1D Average pooling layer
+        self.avg_pool = nn.AvgPool1d(kernel_size=6, stride=4)
+
+        # Linear layer for attention
+        self.linear_attn = nn.Linear(3200 + 32, 64)
+
+        # LSTM layer
+        self.lstm = nn.LSTM(64, hidden_size=8, num_layers=1, batch_first=True)
+
+        # Final dense layer for steering angle
+        self.final_dense_sa = nn.Sequential(
+            nn.Linear(in_features=64, out_features=32),
+            nn.ReLU(),
+            nn.Linear(in_features=32, out_features=2),
+        )
+
+        # Final dense layer for acceleration
+        self.final_dense_acc = nn.Sequential(
+            nn.Linear(in_features=64, out_features=32),
+            nn.ReLU(),
+            nn.Linear(in_features=32, out_features=2),
+        )
+
+    def forward(self, x_vec, x_img):
+        # Image processing
+        x_img = self.conv(x_img)
+        # print(x_img.ndim)
+        if x_img.ndim == 3:
+            # print("Single Input")
+            x_img = torch.flatten(x_img)
+        if x_img.ndim == 4:
+            # print("Batch Input")
+            x_img = torch.flatten(x_img, start_dim=1)
+        # Processing state
+        x_vec = Fu.relu(self.fc1(x_vec))
+        x_vec = Fu.relu(self.fc2(x_vec))
+
+        x = 0
+        if x_img.ndim == 1:
+            x = torch.cat((x_img, x_vec))
+        if x_img.ndim == 2:
+            x = torch.cat((x_img, x_vec), dim=1)
+
+        x = self.linear_attn(x)
+
+        # Output alpha and beta value for steering angle and acceleration to be used in Beta distribution
+        ba_sa = torch.exp(self.final_dense_sa(x))
+        ba_sa = 1 + ba_sa
+        ba_acc = torch.exp(self.final_dense_acc(x))
         ba_acc = 1 + ba_acc
         return ba_sa, ba_acc
 

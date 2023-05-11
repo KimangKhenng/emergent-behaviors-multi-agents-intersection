@@ -92,7 +92,7 @@ class RolloutBuffer:
                     rewards_dict[agent_name] = -10
         # Extract the reward values and maintain chronological order
         # rewards_list = [rewards_dict[f'agent{i}'] for i in range(len(rewards_dict))]
-        print(rewards_dict)
+        # print(rewards_dict)
         rewards_list = [i for i in rewards_dict.values()]
         self.rewards.extend(rewards_list)
 
@@ -105,7 +105,7 @@ class RolloutBuffer:
         # Extract the done values and maintain chronological order
         # print(terminated_dict)
         # terminated_list = [terminated_dict[f'agent{i}'] for i in range(len(terminated_dict) - 1)]
-        print(terminated_dict)
+        # print(terminated_dict)
         terminated_list = [i for i in terminated_dict.values()]
         self.is_terminated.extend(terminated_list)
 
@@ -207,8 +207,8 @@ class CentralPPOAgents(nn.Module):
         logprobs = OrderedDict()
         joined_states = OrderedDict()
         # Loop through all agents by key
-        print("Agents")
-        print(states.keys())
+        # print("Agents")
+        # print(states.keys())
         for key in states.keys():
             # Select action for each agent
             action, logprob = self.select_action(key, states[key])
@@ -231,8 +231,8 @@ class CentralPPOAgents(nn.Module):
             self.rollout_buffer.state_action_values.append(state_action_values)
             self.rollout_buffer.joined_action_state.append(joined_actions_states)
 
-        for a in actions.values():
-            a[-1] = 1.0
+        # for a in actions.values():
+        #     a[-1] = 1.0
         return actions
 
     def update(self):
