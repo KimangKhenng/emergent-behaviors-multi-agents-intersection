@@ -60,6 +60,7 @@ class Policy(nn.Module):
             nn.Linear(in_features=64, out_features=32),
             nn.ReLU(),
             nn.Linear(in_features=32, out_features=2),
+            nn.Softplus()
             # nn.ReLU(),
             # nn.Linear(in_features=100, out_features=2),
         )
@@ -69,6 +70,7 @@ class Policy(nn.Module):
             nn.Linear(in_features=64, out_features=32),
             nn.ReLU(),
             nn.Linear(in_features=32, out_features=2),
+            nn.Softplus()
             # nn.ReLU(),
             # nn.Linear(in_features=100, out_features=2),
         )
@@ -131,9 +133,9 @@ class Policy(nn.Module):
             lstm_output = torch.flatten(lstm_output, start_dim=1)
 
         # Output alpha and beta value for steering angle and acceleration to be used in Beta distribution
-        ba_sa = torch.exp(self.final_dense_sa(lstm_output))
+        ba_sa = self.final_dense_sa(lstm_output)
         ba_sa = 1 + ba_sa
-        ba_acc = torch.exp(self.final_dense_acc(lstm_output))
+        ba_acc = self.final_dense_acc(lstm_output)
         ba_acc = 1 + ba_acc
         return ba_sa, ba_acc
 

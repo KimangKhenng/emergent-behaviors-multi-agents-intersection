@@ -28,9 +28,10 @@ obs = env.reset()
 # print("Image Shape: ", obs['agent4']['image'][0, 0, :, 0])
 
 state = torch.from_numpy(obs['agent3']['state'])
-sample_image = obs['agent0']['image']
-sample_image = sample_image[:, :, :, -1]
+sample_image = obs['agent2']['image']
 print(sample_image.shape)
+sample_image = sample_image[:, :, :, -1]
+# print(sample_image.shape)
 
 # # swap the last two dimensions
 # sample_image = np.transpose(sample_image, (0, 1, 3, 2))
@@ -41,8 +42,8 @@ print(sample_image.shape)
 # data_3d = sample_image[..., 0]
 
 # plot the data along the first dimension (height)
-# plt.imshow(sample_image[:, :, :, -1])
-# plt.show()
+plt.imshow(sample_image)
+plt.show()
 
 
 # torch_tensor = torch.from_numpy(sample_image)
@@ -57,11 +58,11 @@ print(sample_image.shape)
 # ba_sa, ba_acc = model.forward(x_img=torch_tensor, x_vec=state)
 # print(ba_sa[0])
 
-central_agent = IndividualActorCritics(state_size=19)
-# action = central_agent.actor(agent_name='agent0', state=obs['agent0']['state']),
-# print(action)
-
-summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0, 1)])
+# central_agent = IndividualActorCritics(state_size=19)
+# # action = central_agent.actor(agent_name='agent0', state=obs['agent0']['state']),
+# # print(action)
+#
+# summary(central_agent.actor, [state, torch.from_numpy(sample_image).permute(2, 0, 1)])
 # Define the hyperparameters
 # learning_rate = 0.01
 # gamma = 0.99

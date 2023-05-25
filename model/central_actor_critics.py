@@ -7,8 +7,8 @@ from model.network import QValueApproximation
 
 
 class CentralActorCritics(BaseActorCritics):
-    def __init__(self, state_size=19, num_agents=8, vocab_size=32):
-        super().__init__(state_size=state_size, vocab_size=vocab_size)
+    def __init__(self, state_size=19, num_agents=8):
+        super().__init__(state_size=state_size)
         self.critic = QValueApproximation(state_size=state_size * num_agents, joined_actions_size=2 * num_agents)
 
     def forward(self):
@@ -20,11 +20,11 @@ class CentralActorCritics(BaseActorCritics):
         sa_dist = Beta(ba_sa[0], ba_sa[1])
         acc_dist = Beta(ba_acc[0], ba_acc[1])
 
-        sa_action = sa_dist.sample()
-        acc_action = acc_dist.sample()
+        sa_action = 2.0*sa_dist.sample() - 1.0
+        acc_action = 2.0*acc_dist.sample() - 1.0
 
-        sa_logprobs = sa_dist.log_prob(sa_action)
-        acc_logprobs = acc_dist.log_prob(acc_action)
+        sa_logprobs = sa_dist.log_prob((sa_action + 1.0)/2.0)
+        acc_logprobs = acc_dist.log_prob((acc_action + 1.0)/2.0)
 
         action_state_value = self.critic(joined_state_action)
 
