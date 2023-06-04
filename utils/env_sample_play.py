@@ -1,8 +1,8 @@
-from envs.multi_agents import MultiAgentsEnv
-from envs.single_agent_intersection import SingleAgentsEnv
+from envs.multi_agents import MultiAgentsInterEnv
+from envs.single_agent_intersection import SingleAgentInterEnv
 from metadrive.examples import expert
 # env = MultiAgentsEnv(num_agents=8)
-env = SingleAgentsEnv()
+env = SingleAgentInterEnv()
 obs = env.reset()
 frames = []
 ep_reward = 0.0

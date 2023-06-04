@@ -1,13 +1,13 @@
 import random
-
-from envs.multi_agents import MultiAgentsEnv
-from envs.single_agent_intersection import SingleAgentsEnv
 import matplotlib.pyplot as plt
-from metadrive import MetaDriveEnv
+
+from envs.multi_agents import MultiAgentsInterEnv
+
+import cv2
 
 
 def get_env_info_single(env):
-    obs = env.reset()
+    # obs = env.reset()
 
     for step in range(100):
         action = env.action_space.sample()
@@ -22,23 +22,24 @@ def get_env_info_single(env):
     plt.show()
 
 
-
-
-
 def get_env_info_marl(env):
     obs = env.reset()
 
     action = env.action_space.sample()
     for a in action.values():
         a[-1] = 1.0
-    o, r, d, i = env.step(action)
+    obs, r, d, i = env.step(action)
 
     print("State Length: ", obs['agent0']['state'].shape)
-    print("Image Shape: ", obs['agent0']['image'][0, 0, :, 0])
+    print("Image Shape: ", obs['agent1']['image'].shape)
     print("Env Info: ", i['agent0'])
+    cv2.imshow('img', obs['agent0']['image'][..., -1])
+
+    # Show the plot
+    cv2.waitKey(0)
 
 
 if __name__ == '__main__':
-    # env = MultiAgentsEnv(num_agents=8)
-    env = SingleAgentsEnv()
-    get_env_info_single(env)
+    env = MultiAgentsInterEnv(num_agents=8)
+    # env = SingleAgentInterEnv()
+    get_env_info_marl(env)

@@ -7,8 +7,8 @@ from model.network import QValueApproximation
 
 
 class IndividualActorCritics(BaseActorCritics):
-    def __init__(self, state_size=19, vocab_size=32):
-        super().__init__(state_size=state_size, vocab_size=vocab_size)
+    def __init__(self, state_size=19):
+        super().__init__(state_size=state_size)
 
     def forward(self):
         raise NotImplementedError
