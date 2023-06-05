@@ -33,7 +33,7 @@ def get_env_info_marl(env):
     print("State Length: ", obs['agent0']['state'].shape)
     print("Image Shape: ", obs['agent1']['image'].shape)
     print("Env Info: ", i['agent0'])
-    cv2.imshow('img', obs['agent0']['image'][..., -1])
+    cv2.imshow('img', obs['agent3']['image'][..., -1])
 
     # Show the plot
     cv2.waitKey(0)

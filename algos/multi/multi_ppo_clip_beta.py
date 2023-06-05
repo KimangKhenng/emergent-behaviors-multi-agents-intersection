@@ -58,11 +58,11 @@ def get_joined_action_state(actions, state):
     arrays = [v for k, v in joined_states.items()]
     concat_states = np.concatenate(arrays)
     joined_actions_states = np.concatenate((concat_actions, concat_states))
-    joined_actions_states = torch.from_numpy(joined_actions_states)
+    joined_actions_states = torch.from_numpy(joined_actions_states).to(device)
     # print("joined_actions_states.shape: ", joined_actions_states.shape)
-    if joined_actions_states.shape[0] < 84:
-        padding = (0, 84 - joined_actions_states.shape[0])
-        joined_actions_states = torch.nn.functional.pad(joined_actions_states, padding)
+    # if joined_actions_states.shape[0] < 84:
+    #     padding = (0, 84 - joined_actions_states.shape[0])
+    #     joined_actions_states = torch.nn.functional.pad(joined_actions_states, padding)
     return joined_actions_states
 
 
@@ -160,21 +160,21 @@ class MultiPPOClipBetaAgents(nn.Module):
         self.optim_batch_size = optim_batch_size
         self.gamma = gamma
         self.eps_clip = eps_clip
-        self.central_policy = CentralActorCritics(state_size=state_size, num_agents=num_agents)
+        self.central_policy = CentralActorCritics(state_size=state_size, num_agents=num_agents).to(device)
         # Optimizer
         self.optimizer = torch.optim.Adam([
             {'params': self.central_policy.actor.parameters(), 'lr': lr_actor},
             {'params': self.central_policy.critic.parameters(), 'lr': lr_critic}
         ])
 
-        self.policy_old = CentralActorCritics(state_size=state_size, num_agents=num_agents)
+        # self.policy_old = CentralActorCritics(state_size=state_size, num_agents=num_agents).to(device)
 
         # Decentralized Policies
         self.decentralized_policies = OrderedDict(
-            ('agent{}'.format(i), IndividualActorCritics(state_size=state_size)) for i in range(num_agents))
+            ('agent{}'.format(i), IndividualActorCritics(state_size=state_size).to(device)) for i in range(num_agents))
 
         for key in self.decentralized_policies.keys():
-            self.policy_old.actor.load_state_dict(self.decentralized_policies[key].actor.state_dict())
+            self.decentralized_policies[key].actor.load_state_dict(self.central_policy.actor.state_dict())
 
         # Mean Squared Error Loss
         self.MseLoss = nn.MSELoss()
@@ -187,8 +187,8 @@ class MultiPPOClipBetaAgents(nn.Module):
         # Assume that state is for individual agent with data type of dict with keys 'state' and 'image'
         with torch.no_grad():
             state = torch.FloatTensor(states['state']).to(device)
-            dept_camera = states['image'][:, :, :, -1]
-            front_view = torch.FloatTensor(dept_camera).permute(2, 0, 1).to(device)
+            rgb_camera = states['image']
+            front_view = torch.FloatTensor(rgb_camera).permute(2, 0, 1).unsqueeze(0).to(device)
             action, logprobs = self.decentralized_policies[agent_name].act(
                 state=state,
                 front_view=front_view,
@@ -213,7 +213,7 @@ class MultiPPOClipBetaAgents(nn.Module):
             action, logprob = self.select_action(key, states[key])
             actions[key] = action
             logprobs[key] = logprob
-            joined_states[key] = states[key]['state']
+            # joined_states[key] = states[key]['state']
             # state roll out buffer
             self.rollout_buffer.add_actions(torch.DoubleTensor(action))
             self.rollout_buffer.logprobs.append(torch.Tensor(logprob))
@@ -250,7 +250,7 @@ class MultiPPOClipBetaAgents(nn.Module):
             rewards.insert(0, discounted_reward)
 
         # Normalizing the rewards
-        rewards = torch.tensor(rewards, dtype=torch.float32)
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # print("State: ", self.rollout_buffer.states)
@@ -337,7 +337,8 @@ class MultiPPOClipBetaAgents(nn.Module):
                 advantages = advantages.squeeze(1)
 
         # Copy new weights into old policy
-        self.policy_old.actor.load_state_dict(self.policy.actor.state_dict())
+        for key in self.decentralized_policies.keys():
+            self.decentralized_policies[key].actor.load_state_dict(self.central_policy.actor.state_dict())
 
         # clear buffer
         self.rollout_buffer.clear()

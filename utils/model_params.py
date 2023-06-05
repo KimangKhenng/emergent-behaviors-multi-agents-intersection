@@ -58,4 +58,12 @@ if __name__ == '__main__':
     # print(sample_image.shape)
     # sample_image = sample_image[:, :, :, -1]
     central_agent = IndividualActorCritics(state_size=STATE_DIM)
+    print("==========================================================================================")
+    print("Single Batch Summary: ")
     summary(central_agent.actor, [state, sample_image])
+    # Testing with Batch Data
+    # batch_images = torch.randn(50, 5, 100, 100)
+    # batch_states = torch.randn(50, 19)
+    # print("==========================================================================================")
+    # print("100 Batch Summary: ")
+    # summary(central_agent.actor, [batch_states, batch_images])

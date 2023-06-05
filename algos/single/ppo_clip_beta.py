@@ -114,16 +114,17 @@ class SinglePPOClipBetaAgent(nn.Module):
     # Select individual action
     def select_action(self, obs):
         # Assume that state is for individual agent with data type of dict with keys 'state' and 'image'
-        dept_camera = obs['image'][:, :, :, -1]
+        # print("state: ", obs['state'].shape)
+        rgb_camera = obs['image']
+        print("rgb_camera: ", rgb_camera.shape)
         with torch.no_grad():
             state = torch.FloatTensor(obs['state']).to(device)
-            front_view = torch.FloatTensor(dept_camera).permute(2, 0, 1).to(device)
+            front_view = torch.FloatTensor(rgb_camera).permute(2, 0, 1).unsqueeze(0).to(device)
             action, logprobs, state_action_val = self.policy_old.act(
                 state=state,
                 front_view=front_view,
             )
             # print("action: ", action)
-            # print("state: ", obs['state'])
             # state_action = numpy.concatenate((obs['state'], action))
             # state_action_value = self.policy.critic(torch.FloatTensor(state_action).to(device))
 
@@ -221,7 +222,7 @@ class SinglePPOClipBetaAgent(nn.Module):
                 advantages = advantages.squeeze(1)
 
         # Copy new weights into old policy
-        self.policy_old.actor.load_state_dict(self.policy.actor.state_dict())
+        self.policy_old.load_state_dict(self.policy.state_dict())
 
         # clear buffer
         self.rollout_buffer.clear()

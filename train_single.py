@@ -1,25 +1,24 @@
 from datetime import datetime
-from envs.single_agent_intersection import SingleAgentsEnv, STATE_DIM
+from envs.single_agent_intersection import SingleAgentInterEnv, STATE_DIM
 import os
 import torch
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
-from model.single_ppo_agent import SinglePPOAgents
+# from torch.utils.tensorboard import SummaryWriter
+from algos.single.ppo_clip_beta import SinglePPOClipBetaAgent
 
-writer = SummaryWriter()
+# writer = SummaryWriter()
 
 
 def train():
     ####### initialize environment hyperparameters ######
-    env_name = "SingleAgentsIntersection"
+    env_name = "PPO-Clip_Beta-Single-Agent-Intersection"
     max_ep_len = 1000  # max timesteps in one episode
     max_training_timesteps = int(2e6)  # break training loop if timeteps > max_training_timesteps
 
-    print_freq = max_ep_len * 10  # print avg reward in the interval (in num timesteps)
+    print_freq = max_ep_len * 5  # print avg reward in the interval (in num timesteps)
     log_freq = max_ep_len * 2  # log avg reward in the interval (in num timesteps)
-    save_model_freq = int(1e5)  # save model frequency (in num timesteps)
+    save_model_freq = int(1e4)  # save model frequency (in num timesteps)
 
-    num_agents = 4  # number of agents in the environment
     #####################################################
     ################ PPO hyperparameters ################
     update_timestep = max_ep_len * 2  # update policy every n timesteps
@@ -36,7 +35,7 @@ def train():
     random_seed = 0  # set random seed if required (0 = no random seed)
     #####################################################
     # Make environment
-    env = SingleAgentsEnv()
+    env = SingleAgentInterEnv()
 
     ###################### logging ######################
 
@@ -86,7 +85,6 @@ def train():
     print("--------------------------------------------------------------------------------------------")
     print("Initializing a continuous action space policy")
     print("--------------------------------------------------------------------------------------------")
-    print("number of agents : ", num_agents)
     print("--------------------------------------------------------------------------------------------")
     print("PPO update frequency : " + str(update_timestep) + " timesteps")
     print("PPO K epochs : ", K_epochs)
@@ -109,13 +107,13 @@ def train():
     ################# training procedure ################
 
     # initialize a PPO agent
-    ppo_agent = SinglePPOAgents(state_size=STATE_DIM,
-                                batch_size=batch_size,
-                                lr_actor=lr_actor,
-                                lr_critic=lr_critic,
-                                gamma=gamma,
-                                k_epochs=K_epochs,
-                                eps_clip=eps_clip)
+    ppo_agent = SinglePPOClipBetaAgent(state_size=STATE_DIM,
+                                       batch_size=batch_size,
+                                       lr_actor=lr_actor,
+                                       lr_critic=lr_critic,
+                                       gamma=gamma,
+                                       k_epochs=K_epochs,
+                                       eps_clip=eps_clip)
 
     # track total training time
     start_time = datetime.now().replace(microsecond=0)
@@ -157,7 +155,7 @@ def train():
             # print(len(obs))
             # print("rewards : ", r)
             # print("done : ", d)
-            env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=True, screen_size=(1000, 1000))
+            # env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=True, screen_size=(1000, 1000))
             # print(d)
 
             # saving reward and is_terminals
@@ -218,7 +216,7 @@ def train():
 
             # break; if the episode is over
             if d:
-                writer.flush()
+                # writer.flush()
                 break
 
         print_running_reward += current_ep_reward

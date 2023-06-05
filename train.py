@@ -1,33 +1,34 @@
 from datetime import datetime
 
-from envs.multi_agents import MultiAgentsEnv, STATE_DIM
+from envs.multi_agents import MultiAgentsInterEnv, STATE_DIM
+from algos.multi.multi_ppo_clip_beta import MultiPPOClipBetaAgents
 import os
 import torch
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 from model.agent import CentralPPOAgents
 
-writer = SummaryWriter()
+# writer = SummaryWriter()
 
 
 def train():
     ####### initialize environment hyperparameters ######
-    env_name = "MultiAgentsIntersection-8"
+    env_name = "PPO-Clip_Beta-Multi-Intersection-4"
     max_ep_len = 1000  # max timesteps in one episode
-    max_training_timesteps = int(1e5)  # break training loop if timeteps > max_training_timesteps
+    max_training_timesteps = int(2e6)  # break training loop if timeteps > max_training_timesteps
 
-    print_freq = max_ep_len * 10  # print avg reward in the interval (in num timesteps)
+    print_freq = max_ep_len * 5  # print avg reward in the interval (in num timesteps)
     log_freq = max_ep_len * 2  # log avg reward in the interval (in num timesteps)
-    save_model_freq = int(1e5)  # save model frequency (in num timesteps)
+    save_model_freq = int(1e4)  # save model frequency (in num timesteps)
 
     num_agents = 4  # number of agents in the environment
     #####################################################
     ################ PPO hyperparameters ################
-    update_timestep = max_ep_len * 1  # update policy every n timesteps
+    update_timestep = max_ep_len * 2  # update policy every n timesteps
     # update_timestep = 100  # update policy every n timesteps
-    K_epochs = 1  # update policy for K epochs in one PPO update
-    optim_batch_size = 128  # training batch size
+    K_epochs = 5  # update policy for K epochs in one PPO update
+    batch_size = 100  # training batch size
 
     eps_clip = 0.2  # clip parameter for PPO
     gamma = 0.99  # discount factor
@@ -38,7 +39,7 @@ def train():
     random_seed = 0  # set random seed if required (0 = no random seed)
     #####################################################
     # Make environment
-    env = MultiAgentsEnv(num_agents=num_agents)
+    env = MultiAgentsInterEnv(num_agents=num_agents)
 
     ###################### logging ######################
 
@@ -110,15 +111,15 @@ def train():
     ################# training procedure ################
 
     # initialize a PPO agent
-    ppo_agent = CentralPPOAgents(state_size=STATE_DIM,
-                                 joined_actions_size=num_agents * 2,
-                                 num_agents=num_agents,
-                                 lr_actor=lr_actor,
-                                 lr_critic=lr_critic,
-                                 gamma=gamma,
-                                 k_epochs=K_epochs,
-                                 optim_batch_size=optim_batch_size,
-                                 eps_clip=eps_clip)
+    ppo_agent = MultiPPOClipBetaAgents(state_size=STATE_DIM,
+                                       joined_actions_size=num_agents * 2,
+                                       num_agents=num_agents,
+                                       lr_actor=lr_actor,
+                                       lr_critic=lr_critic,
+                                       gamma=gamma,
+                                       k_epochs=K_epochs,
+                                       optim_batch_size=batch_size,
+                                       eps_clip=eps_clip)
 
     # track total training time
     start_time = datetime.now().replace(microsecond=0)
@@ -160,7 +161,7 @@ def train():
             # print(len(obs))
             # print("rewards : ", r)
             # print("done : ", d)
-            # env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
+            env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=False, screen_size=(1000, 1000))
             # print(d)
 
             # saving reward and is_terminals
@@ -175,9 +176,9 @@ def train():
             # writer.add_scalar("time/reward", time_step, current_ep_reward)
             print("current_ep_reward : ", current_ep_reward)
             print("time_step : ", time_step)
-            for agent_name, info in i.items():
-                if info['arrive_dest']:
-                    total_successes += 1
+            # for agent_name, info in i.items():
+            #     if info['arrive_dest']:
+            #         total_successes += 1
 
             # success_rates.append(success_rate)
 
@@ -223,7 +224,7 @@ def train():
 
             # break; if the episode is over
             if d["__all__"]:
-                writer.flush()
+                # writer.flush()
                 break
 
         print_running_reward += current_ep_reward
