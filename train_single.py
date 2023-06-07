@@ -1,10 +1,13 @@
 from datetime import datetime
 from envs.single_agent_intersection import SingleAgentInterEnv, STATE_DIM
 import os
+# Set CUDA max split size to avoid runing out of memory
+# import GPUtil
 import torch
 import numpy as np
 # from torch.utils.tensorboard import SummaryWriter
 from algos.single.ppo_clip_beta import SinglePPOClipBetaAgent
+
 
 # writer = SummaryWriter()
 
@@ -21,10 +24,10 @@ def train():
 
     #####################################################
     ################ PPO hyperparameters ################
-    update_timestep = max_ep_len * 2  # update policy every n timesteps
+    update_timestep = max_ep_len * 4  # update policy every n timesteps
     # update_timestep = 100  # update policy every n timesteps
-    K_epochs = 5  # update policy for K epochs in one PPO update
-    batch_size = 100  # training batch size
+    K_epochs = 10  # update policy for K epochs in one PPO update
+    batch_size = 64  # training batch size
 
     eps_clip = 0.2  # clip parameter for PPO
     gamma = 0.99  # discount factor
@@ -32,7 +35,7 @@ def train():
     lr_actor = 0.0003  # learning rate for actor network
     lr_critic = 0.001  # learning rate for critic network
 
-    random_seed = 0  # set random seed if required (0 = no random seed)
+    random_seed = 100  # set random seed if required (0 = no random seed)
     #####################################################
     # Make environment
     env = SingleAgentInterEnv()
@@ -61,7 +64,7 @@ def train():
     #####################################################
 
     ################### checkpointing ###################
-    run_num_pretrained = 0  #### change this to prevent overwriting weights in same env_name folder
+    run_num_pretrained = 1  #### change this to prevent overwriting weights in same env_name folder
 
     directory = "PPO_preTrained"
     if not os.path.exists(directory):
@@ -94,12 +97,12 @@ def train():
     print("optimizer learning rate actor : ", lr_actor)
     print("optimizer learning rate critic : ", lr_critic)
     print("Training batch size : ", batch_size)
-    if random_seed:
-        print("--------------------------------------------------------------------------------------------")
-        print("setting random seed to ", random_seed)
-        torch.manual_seed(random_seed)
-        env.seed(random_seed)
-        np.random.seed(random_seed)
+    # if random_seed:
+    #     print("--------------------------------------------------------------------------------------------")
+    #     print("setting random seed to ", random_seed)
+    #     torch.manual_seed(random_seed)
+    #     env.seed(random_seed)
+    #     np.random.seed(random_seed)
     #####################################################
 
     print("============================================================================================")
@@ -241,4 +244,4 @@ def train():
 
 if __name__ == '__main__':
     train()
-    writer.flush()
+    # writer.flush()

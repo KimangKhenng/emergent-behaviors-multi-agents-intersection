@@ -1,13 +1,18 @@
 import math
 from collections import OrderedDict
-
-import numpy
+import os
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+from GPUtil import showUtilization as gpu_usage
+import gc
 
 from model.actor_critic import ActorCritics
+
+# ## Split the GPU memory allocation
+# os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'garbage_collection_threshold:0.6'
+# os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 
 ################################## set device ##################################
 print("============================================================================================")
@@ -116,10 +121,10 @@ class SinglePPOClipBetaAgent(nn.Module):
         # Assume that state is for individual agent with data type of dict with keys 'state' and 'image'
         # print("state: ", obs['state'].shape)
         rgb_camera = obs['image']
-        print("rgb_camera: ", rgb_camera.shape)
+        # print("rgb_camera: ", rgb_camera.shape)
         with torch.no_grad():
-            state = torch.FloatTensor(obs['state']).to(device)
-            front_view = torch.FloatTensor(rgb_camera).permute(2, 0, 1).unsqueeze(0).to(device)
+            state = torch.Tensor(obs['state']).to(device)
+            front_view = torch.Tensor(rgb_camera).permute(2, 0, 1).unsqueeze(0).to(device)
             action, logprobs, state_action_val = self.policy_old.act(
                 state=state,
                 front_view=front_view,
@@ -153,16 +158,22 @@ class SinglePPOClipBetaAgent(nn.Module):
 
         # Normalizing the rewards
         rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
+        # rewards = torch.tensor(rewards, dtype=torch.float32)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # print("State: ", self.rollout_buffer.states)
         # convert list to tensor
-        old_states = torch.squeeze(torch.stack(self.rollout_buffer.states, dim=0)).detach().to(device)
-        old_front_view = torch.squeeze(torch.stack(self.rollout_buffer.front_views, dim=0)).detach().to(device)
+        old_states = torch.squeeze(torch.stack(self.rollout_buffer.states, dim=0)).detach()
+        old_front_view = torch.squeeze(torch.stack(self.rollout_buffer.front_views, dim=0)).detach()
         old_actions = torch.squeeze(torch.stack(self.rollout_buffer.actions, dim=0)).detach().to(device)
         old_logprobs = torch.squeeze(torch.stack(self.rollout_buffer.logprobs, dim=0)).detach().to(device)
         old_state_values = torch.squeeze(torch.stack(self.rollout_buffer.state_action_values, dim=0)).detach().to(
             device)
+        # old_states = torch.squeeze(torch.stack(self.rollout_buffer.states, dim=0)).detach()
+        # old_front_view = torch.squeeze(torch.stack(self.rollout_buffer.front_views, dim=0)).detach()
+        # old_actions = torch.squeeze(torch.stack(self.rollout_buffer.actions, dim=0)).detach()
+        # old_logprobs = torch.squeeze(torch.stack(self.rollout_buffer.logprobs, dim=0)).detach()
+        # old_state_values = torch.squeeze(torch.stack(self.rollout_buffer.state_action_values, dim=0)).detach()
 
         print("Old State Values: ", old_state_values.shape)
         print("Rewards: ", rewards.shape)
@@ -188,6 +199,12 @@ class SinglePPOClipBetaAgent(nn.Module):
                            ) in enumerate(dataloader):
                 print("Performing Optimization: ", step)
                 print("Batch ID: ", id_batch)
+                # old_states_batch_gpu = old_states_batch.to(device)
+                # old_front_view_batch_gpu = old_front_view_batch.to(device)
+                # old_actions_batch_gpu = old_actions_batch.to(device)
+                # old_state_values_batch_gpu = old_state_values_batch.to(device)
+                # rewards_batch_gpu = rewards_batch.to(device)
+                # old_logprobs_batch_gpu = old_logprobs_batch.to(device)
                 logprobs, dist_entropy, action_state_value = self.policy.evaluate(
                     old_states_batch,
                     old_front_view_batch,
@@ -226,6 +243,10 @@ class SinglePPOClipBetaAgent(nn.Module):
 
         # clear buffer
         self.rollout_buffer.clear()
+        gc.collect()
+        torch.cuda.empty_cache()
+        del loss
+        gpu_usage()
 
     def save(self, checkpoint_path):
         torch.save(self.policy_old.state_dict(), checkpoint_path)

@@ -53,7 +53,7 @@ class Policy(nn.Module):
         # self.linear_attn = nn.Linear(64, 64)
 
         # LSTM layer
-        self.lstm = nn.LSTM(3232, hidden_size=8, num_layers=1, batch_first=True)
+        self.lstm = nn.LSTM(4640, hidden_size=8, num_layers=1, batch_first=True)
 
         # Final dense layer for steering angle
         self.final_dense_sa = nn.Sequential(
