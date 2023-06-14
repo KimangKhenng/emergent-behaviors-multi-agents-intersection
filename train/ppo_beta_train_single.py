@@ -1,33 +1,35 @@
 from datetime import datetime
-
-from algos.single.ppo_clip_mlp_beta_torch import SinglePPOClipMLPBetaAgent
-from envs.single_agent_intersection import SingleAgentInterEnv, STATE_DIM
 import os
-# Set CUDA max split size to avoid runing out of memory
-# import GPUtil
 import torch
 import numpy as np
+
+from algos.single.ppo_clip_mlp_beta_torch import SinglePPOClipMLPBetaAgent
 # from torch.utils.tensorboard import SummaryWriter
-from algos.single.ppo_clip_beta import SinglePPOClipBetaAgent
-from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
+from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv, lidar_config
+import json
+import pprint
 
 
 # writer = SummaryWriter()
 
 
 def train():
-    ####### initialize environment hyperparameters ######
-    env_name = "PPO-Clip_MLP_Beta-Single-Agent-Intersection"
+    """
+    initialize environment hyperparameters
+    """
+    env_name = "SingleAgentIntersection-MLP-Beta-v0"
     max_ep_len = 1000  # max timesteps in one episode
-    max_training_timesteps = int(2e6)  # break training loop if timeteps > max_training_timesteps
+    max_training_timesteps = int(1e7)  # break training loop if timeteps > max_training_timesteps
 
-    print_freq = max_ep_len * 5  # print avg reward in the interval (in num timesteps)
+    print_freq = max_ep_len * 3  # print avg reward in the interval (in num timesteps)
     log_freq = max_ep_len * 2  # log avg reward in the interval (in num timesteps)
-    save_model_freq = int(1e4)  # save model frequency (in num timesteps)
-
-    #####################################################
-    ################ PPO hyperparameters ################
+    save_model_freq = int(1e5)  # save model frequency (in num timesteps)
+    numbers_of_models_to_save = max_training_timesteps // save_model_freq
     update_timestep = max_ep_len * 2  # update policy every n timesteps
+
+    """
+    PPO Hyperparameters
+    """
     # update_timestep = 100  # update policy every n timesteps
     K_epochs = 5  # update policy for K epochs in one PPO update
     batch_size = 256  # training batch size
@@ -39,14 +41,28 @@ def train():
     lr_critic = 0.001  # learning rate for critic network
 
     random_seed = 100  # set random seed if required (0 = no random seed)
-    #####################################################
-    # Make environment
+
+    """
+    Policy Parameters
+    """
+    hidden_size = 256
+    num_layers = 2
+    hidden_size_2 = 128
+    num_layers_2 = 2
+    output_size = 2
+    action_size = 2
+    critics_hidden_size = 500
+    critics_num_layers = 2
+
+    """
+    Make Enviorment
+    """
     env = SingleAgentInterLidarEnv()
 
     ###################### logging ######################
 
     #### log files for multiple runs are NOT overwritten
-    log_dir = "PPO_logs"
+    log_dir = "logs"
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -54,13 +70,55 @@ def train():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
+    """
+    Dumping the config file into the log directory
+    """
+    train_config = {
+        "env_name": env_name,
+        "max_ep_len": max_ep_len,
+        "max_training_timesteps": max_training_timesteps,
+        "print_freq": print_freq,
+        "log_freq": log_freq,
+        "save_model_freq": save_model_freq,
+        "update_timestep": update_timestep,
+        "numbers_of_models_to_save": numbers_of_models_to_save,
+    }
+    ppo_config = {
+        "K_epochs": K_epochs,
+        "batch_size": batch_size,
+        "eps_clip": eps_clip,
+        "gamma": gamma,
+        "lr_actor": lr_actor,
+        "lr_critic": lr_critic,
+    }
+    policy_config = {
+        "hidden_size": hidden_size,
+        "num_layers": num_layers,
+        "hidden_size_2": hidden_size_2,
+        "num_layers_2": num_layers_2,
+        "output_size": output_size,
+        "action_size": action_size,
+        "critics_hidden_size": critics_hidden_size,
+        "critics_num_layers": critics_num_layers,
+    }
+    config = dict({
+        "train_config": train_config,
+        "ppo_config": ppo_config,
+        "policy_config": policy_config,
+    })
+    print("config : ", config)
+    log_json_file = log_dir + '/config.json'
+    with open(log_json_file, "w") as outfile:
+        json.dump(config, outfile)
+
     #### get number of log files in log directory
     run_num = 0
     current_num_files = next(os.walk(log_dir))[2]
-    run_num = len(current_num_files)
+    run_num = len(current_num_files) - 1
+    print("current number of files : ", run_num)
 
     #### create new log file for each run
-    log_f_name = log_dir + '/PPO_' + env_name + "_log_" + str(run_num) + ".csv"
+    log_f_name = log_dir + '/PPO_' + env_name + "_log_reward_" + str(run_num) + ".csv"
 
     print("current logging run number for " + env_name + " : ", run_num)
     print("logging at : " + log_f_name)
@@ -69,7 +127,7 @@ def train():
     ################### checkpointing ###################
     run_num_pretrained = 1  #### change this to prevent overwriting weights in same env_name folder
 
-    directory = "PPO_preTrained"
+    directory = "preTrained"
     if not os.path.exists(directory):
         os.makedirs(directory)
 
@@ -77,7 +135,8 @@ def train():
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    checkpoint_path = directory + "PPO_{}_{}_{}.pth".format(env_name, random_seed, run_num_pretrained)
+    save_iteration = 0
+    checkpoint_path = directory + "PPO_{}_{}.pth".format(env_name, save_iteration)
     print("save checkpoint path : " + checkpoint_path)
     #####################################################
 
@@ -87,6 +146,7 @@ def train():
     print("max timesteps per episode : ", max_ep_len)
     print("model saving frequency : " + str(save_model_freq) + " timesteps")
     print("log frequency : " + str(log_freq) + " timesteps")
+    print("Number of models to save : " + str(numbers_of_models_to_save))
     print("printing average reward over episodes in last : " + str(print_freq) + " timesteps")
     print("--------------------------------------------------------------------------------------------")
     print("Initializing a continuous action space policy")
@@ -100,13 +160,7 @@ def train():
     print("optimizer learning rate actor : ", lr_actor)
     print("optimizer learning rate critic : ", lr_critic)
     print("Training batch size : ", batch_size)
-    # if random_seed:
-    #     print("--------------------------------------------------------------------------------------------")
-    #     print("setting random seed to ", random_seed)
-    #     torch.manual_seed(random_seed)
-    #     env.seed(random_seed)
-    #     np.random.seed(random_seed)
-    #####################################################
+    ####################################################
 
     print("============================================================================================")
 
@@ -119,7 +173,16 @@ def train():
                                           lr_critic=lr_critic,
                                           gamma=gamma,
                                           k_epochs=K_epochs,
-                                          eps_clip=eps_clip)
+                                          eps_clip=eps_clip,
+                                          hidden_size=hidden_size,
+                                          num_layers=num_layers,
+                                          hidden_size_2=hidden_size_2,
+                                          num_layers_2=num_layers_2,
+                                          output_size=output_size,
+                                          action_size=action_size,
+                                          critics_hidden_size=critics_hidden_size,
+                                          critics_num_layers=critics_num_layers,
+                                          )
 
     # track total training time
     start_time = datetime.now().replace(microsecond=0)
@@ -172,8 +235,8 @@ def train():
             time_step += 1
             current_ep_reward += r
             # writer.add_scalar("time/reward", time_step, current_ep_reward)
-            print("current_ep_reward : ", current_ep_reward)
-            print("time_step : ", time_step)
+            # print("current_ep_reward : ", current_ep_reward)
+            # print("time_step : ", time_step)
             # for agent_name, info in i.items():
             #     if info['arrive_dest']:
             #         total_successes += 1
@@ -182,7 +245,6 @@ def train():
 
             # update PPO agent
             if time_step % update_timestep == 0:
-                print("updating PPO agent")
                 ppo_agent.update()
                 # obs = env.reset()
 
@@ -191,7 +253,6 @@ def train():
                 # log average reward till last episode
                 log_avg_reward = log_running_reward / log_running_episodes
                 log_avg_reward = round(log_avg_reward, 4)
-                success_rate = total_successes / len(i)
 
                 log_f.write('{},{},{}\n'.format(i_episode, time_step, log_avg_reward))
                 log_f.flush()
@@ -216,6 +277,8 @@ def train():
                 print("--------------------------------------------------------------------------------------------")
                 print("saving model at : " + checkpoint_path)
                 ppo_agent.save(checkpoint_path)
+                save_iteration += 1
+                checkpoint_path = directory + "PPO_{}_{}.pth".format(env_name, save_iteration)
                 print("model saved")
                 print("Elapsed Time  : ", datetime.now().replace(microsecond=0) - start_time)
                 print("--------------------------------------------------------------------------------------------")
@@ -241,10 +304,12 @@ def train():
     end_time = datetime.now().replace(microsecond=0)
     print("Started training at (GMT) : ", start_time)
     print("Finished training at (GMT) : ", end_time)
+    checkpoint_path = directory + "PPO_{}_{}.pth".format(env_name, "final")
+    print("saving model at : " + checkpoint_path)
+    ppo_agent.save(checkpoint_path)
     print("Total training time  : ", end_time - start_time)
     print("============================================================================================")
 
 
 if __name__ == '__main__':
     train()
-    # writer.flush()

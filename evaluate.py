@@ -39,7 +39,7 @@ def test():
     render = True  # render environment on screen
     frame_delay = 0  # if required; add delay b/w frames
 
-    total_test_episodes = 100  # total num of testing episodes
+    total_test_episodes = 1000  # total num of testing episodes
 
     K_epochs = 5  # update policy for K epochs
     batch_size = 100  # training batch size

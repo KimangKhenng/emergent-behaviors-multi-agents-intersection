@@ -1,36 +1,42 @@
+import os
+import glob
+import time
 from datetime import datetime
 
-from algos.single.ppo_clip_mlp_beta_torch import SinglePPOClipMLPBetaAgent
-from envs.single_agent_intersection import SingleAgentInterEnv, STATE_DIM
-import os
-# Set CUDA max split size to avoid runing out of memory
-# import GPUtil
 import torch
 import numpy as np
-# from torch.utils.tensorboard import SummaryWriter
-from algos.single.ppo_clip_beta import SinglePPOClipBetaAgent
+
+from algos.single.ppo_clip_mlp_normal import SinglePPOClipMLPNormalAgent
 from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
 
 
-# writer = SummaryWriter()
-
-
+################################### Training ###################################
 def train():
+    print("============================================================================================")
+
     ####### initialize environment hyperparameters ######
-    env_name = "PPO-Clip_MLP_Beta-Single-Agent-Intersection"
+    env_name = "SingleAgentIntersection-MLP-v0"
+
+    has_continuous_action_space = True  # continuous action space; else discrete
+
     max_ep_len = 1000  # max timesteps in one episode
-    max_training_timesteps = int(2e6)  # break training loop if timeteps > max_training_timesteps
+    max_training_timesteps = int(1e7)  # break training loop if timeteps > max_training_timesteps
 
-    print_freq = max_ep_len * 5  # print avg reward in the interval (in num timesteps)
+    print_freq = max_ep_len * 3  # print avg reward in the interval (in num timesteps)
     log_freq = max_ep_len * 2  # log avg reward in the interval (in num timesteps)
-    save_model_freq = int(1e4)  # save model frequency (in num timesteps)
+    save_model_freq = int(1e5)  # save model frequency (in num timesteps)
 
+    action_std = 0.6  # starting std for action distribution (Multivariate Normal)
+    action_std_decay_rate = 0.05  # linearly decay action_std (action_std = action_std - action_std_decay_rate)
+    min_action_std = 0.1  # minimum action_std (stop decay after action_std <= min_action_std)
+    action_std_decay_freq = int(2.5e5)  # action_std decay frequency (in num timesteps)
     #####################################################
+
+    ## Note : print/log frequencies should be > than max_ep_len
+
     ################ PPO hyperparameters ################
     update_timestep = max_ep_len * 2  # update policy every n timesteps
-    # update_timestep = 100  # update policy every n timesteps
     K_epochs = 5  # update policy for K epochs in one PPO update
-    batch_size = 256  # training batch size
 
     eps_clip = 0.2  # clip parameter for PPO
     gamma = 0.99  # discount factor
@@ -38,15 +44,26 @@ def train():
     lr_actor = 0.0003  # learning rate for actor network
     lr_critic = 0.001  # learning rate for critic network
 
-    random_seed = 100  # set random seed if required (0 = no random seed)
+    random_seed = 0  # set random seed if required (0 = no random seed)
     #####################################################
-    # Make environment
+
+    print("training environment name : " + env_name)
+
     env = SingleAgentInterLidarEnv()
+
+    # state space dimension
+    state_dim = env.observation_space.shape[0]
+
+    # action space dimension
+    if has_continuous_action_space:
+        action_dim = env.action_space.shape[0]
+    else:
+        action_dim = env.action_space.n
 
     ###################### logging ######################
 
     #### log files for multiple runs are NOT overwritten
-    log_dir = "PPO_logs"
+    log_dir = "logs"
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
@@ -57,7 +74,7 @@ def train():
     #### get number of log files in log directory
     run_num = 0
     current_num_files = next(os.walk(log_dir))[2]
-    run_num = len(current_num_files)
+    run_num = len(current_num_files) - 1
 
     #### create new log file for each run
     log_f_name = log_dir + '/PPO_' + env_name + "_log_" + str(run_num) + ".csv"
@@ -67,9 +84,9 @@ def train():
     #####################################################
 
     ################### checkpointing ###################
-    run_num_pretrained = 1  #### change this to prevent overwriting weights in same env_name folder
+    run_num_pretrained = 0  #### change this to prevent overwriting weights in same env_name folder
 
-    directory = "PPO_preTrained"
+    directory = "preTrained"
     if not os.path.exists(directory):
         os.makedirs(directory)
 
@@ -89,8 +106,18 @@ def train():
     print("log frequency : " + str(log_freq) + " timesteps")
     print("printing average reward over episodes in last : " + str(print_freq) + " timesteps")
     print("--------------------------------------------------------------------------------------------")
-    print("Initializing a continuous action space policy")
+    print("state space dimension : ", state_dim)
+    print("action space dimension : ", action_dim)
     print("--------------------------------------------------------------------------------------------")
+    if has_continuous_action_space:
+        print("Initializing a continuous action space policy")
+        print("--------------------------------------------------------------------------------------------")
+        print("starting std of action distribution : ", action_std)
+        print("decay rate of std of action distribution : ", action_std_decay_rate)
+        print("minimum std of action distribution : ", min_action_std)
+        print("decay frequency of std of action distribution : " + str(action_std_decay_freq) + " timesteps")
+    else:
+        print("Initializing a discrete action space policy")
     print("--------------------------------------------------------------------------------------------")
     print("PPO update frequency : " + str(update_timestep) + " timesteps")
     print("PPO K epochs : ", K_epochs)
@@ -99,13 +126,12 @@ def train():
     print("--------------------------------------------------------------------------------------------")
     print("optimizer learning rate actor : ", lr_actor)
     print("optimizer learning rate critic : ", lr_critic)
-    print("Training batch size : ", batch_size)
-    # if random_seed:
-    #     print("--------------------------------------------------------------------------------------------")
-    #     print("setting random seed to ", random_seed)
-    #     torch.manual_seed(random_seed)
-    #     env.seed(random_seed)
-    #     np.random.seed(random_seed)
+    if random_seed:
+        print("--------------------------------------------------------------------------------------------")
+        print("setting random seed to ", random_seed)
+        torch.manual_seed(random_seed)
+        env.seed(random_seed)
+        np.random.seed(random_seed)
     #####################################################
 
     print("============================================================================================")
@@ -113,13 +139,16 @@ def train():
     ################# training procedure ################
 
     # initialize a PPO agent
-    ppo_agent = SinglePPOClipMLPBetaAgent(state_size=259,
-                                          batch_size=batch_size,
-                                          lr_actor=lr_actor,
-                                          lr_critic=lr_critic,
-                                          gamma=gamma,
-                                          k_epochs=K_epochs,
-                                          eps_clip=eps_clip)
+    ppo_agent = SinglePPOClipMLPNormalAgent(
+        state_dim,
+        action_dim,
+        lr_actor,
+        lr_critic,
+        gamma,
+        K_epochs,
+        eps_clip,
+        has_continuous_action_space,
+        action_std)
 
     # track total training time
     start_time = datetime.now().replace(microsecond=0)
@@ -140,58 +169,39 @@ def train():
 
     time_step = 0
     i_episode = 0
-    success_rates = []
 
     # training loop
     while time_step <= max_training_timesteps:
 
-        obs = env.reset()
+        state = env.reset()
         current_ep_reward = 0
-        total_successes = 0
-        d = {}
-        d["__all__"] = False
 
         for t in range(1, max_ep_len + 1):
-            actions = ppo_agent.select_action(obs)
-            # print("State Size: ", len(ppo_agent.rollout_buffer.states))
-            # print("actions : ", actions)
-            # actions = envs.action_space.sample()
-            # print("Action : ", actions)
-            obs, r, d, i = env.step(actions)
-            # print(len(obs))
-            # print("rewards : ", r)
-            # print("done : ", d)
-            env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=True, screen_size=(1000, 1000))
-            # print(d)
+
+            # select action with policy
+            action = ppo_agent.select_action(state)
+            state, reward, done, _ = env.step(action)
 
             # saving reward and is_terminals
-            ppo_agent.rollout_buffer.add_reward(r)
-            ppo_agent.rollout_buffer.add_terminated(d)
-            # ppo_agent.rollout_buffer.add_next_state_action_values(obs)
-            #
-            time_step += 1
-            current_ep_reward += r
-            # writer.add_scalar("time/reward", time_step, current_ep_reward)
-            print("current_ep_reward : ", current_ep_reward)
-            print("time_step : ", time_step)
-            # for agent_name, info in i.items():
-            #     if info['arrive_dest']:
-            #         total_successes += 1
+            ppo_agent.buffer.rewards.append(reward)
+            ppo_agent.buffer.is_terminals.append(done)
 
-            # success_rates.append(success_rate)
+            time_step += 1
+            current_ep_reward += reward
 
             # update PPO agent
             if time_step % update_timestep == 0:
-                print("updating PPO agent")
                 ppo_agent.update()
-                # obs = env.reset()
+
+            # if continuous action space; then decay action std of ouput action distribution
+            if has_continuous_action_space and time_step % action_std_decay_freq == 0:
+                ppo_agent.decay_action_std(action_std_decay_rate, min_action_std)
 
             # log in logging file
             if time_step % log_freq == 0:
                 # log average reward till last episode
                 log_avg_reward = log_running_reward / log_running_episodes
                 log_avg_reward = round(log_avg_reward, 4)
-                success_rate = total_successes / len(i)
 
                 log_f.write('{},{},{}\n'.format(i_episode, time_step, log_avg_reward))
                 log_f.flush()
@@ -221,8 +231,7 @@ def train():
                 print("--------------------------------------------------------------------------------------------")
 
             # break; if the episode is over
-            if d:
-                # writer.flush()
+            if done:
                 break
 
         print_running_reward += current_ep_reward
@@ -247,4 +256,10 @@ def train():
 
 if __name__ == '__main__':
     train()
-    # writer.flush()
+
+
+
+
+
+
+

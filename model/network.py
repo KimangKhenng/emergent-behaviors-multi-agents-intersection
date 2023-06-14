@@ -8,11 +8,11 @@ from envs.multi_agents import STATE_DIM
 
 
 # Define hybrid policy architecture
-class Policy(nn.Module):
+class CNNPolicy(nn.Module):
 
     def __init__(self, state_size=STATE_DIM, vocab_size=32):
-        super(Policy, self).__init__()
         # Process state information
+        super().__init__()
         self.fc1 = nn.Linear(in_features=state_size, out_features=64)
         self.fc2 = nn.Linear(in_features=64, out_features=32)
 
@@ -53,7 +53,7 @@ class Policy(nn.Module):
         # self.linear_attn = nn.Linear(64, 64)
 
         # LSTM layer
-        self.lstm = nn.LSTM(4640, hidden_size=8, num_layers=1, batch_first=True)
+        self.lstm = nn.LSTM(3232, hidden_size=8, num_layers=1, batch_first=True)
 
         # Final dense layer for steering angle
         self.final_dense_sa = nn.Sequential(
@@ -142,92 +142,122 @@ class Policy(nn.Module):
         return ba_sa, ba_acc
 
 
-class LSTMPolicy(nn.Module):
-    def __init__(self, state_size=STATE_DIM):
-        super(LSTMPolicy, self).__init__()
-        # Process state information
-        self.fc1 = nn.Linear(in_features=state_size, out_features=64)
-        self.fc2 = nn.Linear(in_features=64, out_features=32)
+class MLPPolicy(nn.Module):
+    """
+    Multi-layer perceptron policy network
+    state_size: size of the state vector
+    hidden_size: size of the first hidden layer
+    hidden_size_2: size of the second hidden layer
+    num_layers: number of layers in the first hidden layer
+    num_layers_2: number of layers in the second hidden layer
+    output_size: size of the output vector
+    """
 
-        # Process front view image
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            # nn.Flatten(start_dim=0)
-        )
+    def __init__(
+            self,
+            state_size=259,
+            hidden_size=64,
+            num_layers=2,
+            hidden_size_2=64,
+            num_layers_2=2,
+            output_size=2,
+    ):
+        super().__init__()
+        layers = [nn.Linear(in_features=state_size, out_features=hidden_size), nn.ReLU()]
 
-        # 1D Average pooling layer
+        for _ in range(num_layers - 1):
+            layers.append(nn.Linear(in_features=hidden_size, out_features=hidden_size))
+            layers.append(nn.ReLU())
+
+        self.fc1 = nn.Sequential(*layers)
+
+        self.embedding = nn.Embedding(32, hidden_size_2)
+
+        layers_2 = [nn.Linear(in_features=hidden_size_2, out_features=hidden_size_2), nn.ReLU()]
+        for _ in range(num_layers_2 - 1):
+            layers_2.append(nn.Linear(in_features=hidden_size_2, out_features=hidden_size_2))
+            layers_2.append(nn.ReLU())
+        layers_2.append(nn.Linear(in_features=hidden_size_2, out_features=output_size))
+        layers_2.append(nn.Softplus())
+        self.fc_sa = nn.Sequential(*layers_2)
+
+        layers_3 = [nn.Linear(in_features=hidden_size_2, out_features=hidden_size_2), nn.ReLU()]
+        for _ in range(num_layers_2 - 1):
+            layers_3.append(nn.Linear(in_features=hidden_size_2, out_features=hidden_size_2))
+            layers_3.append(nn.ReLU())
+        layers_3.append(nn.Linear(in_features=hidden_size_2, out_features=output_size))
+        layers_3.append(nn.Softplus())
+        self.fc_acc = nn.Sequential(*layers_3)
+
+        self.self_attn = nn.MultiheadAttention(hidden_size_2, num_heads=8, dropout=0.1)
+        self.lstm = nn.LSTM(hidden_size_2 * 2, hidden_size=8, num_layers=2, batch_first=True)
         self.avg_pool = nn.AvgPool1d(kernel_size=6, stride=4)
 
-        # Linear layer for attention
-        self.linear_attn = nn.Linear(3200 + 32, 64)
+    def forward(self, x):
+        # print("Before Shape: ", x.shape)
+        x = self.fc1(x)
+        # print("After Shape: ", x.shape)
+        x = x.long()
+        x = x.unsqueeze(-1)
+        embedded = self.embedding(x)
+        # print("Embedded Shape: ", embedded.shape)
+        if embedded.ndim == 3:
+            x = embedded.permute(1, 0, 2)
+        if embedded.ndim == 4:
+            x = embedded.permute(2, 0, 1, 3)
+            x = x.squeeze(0)
+        # print("After Shape: ", x.shape)
 
-        # LSTM layer
-        self.lstm = nn.LSTM(64, hidden_size=8, num_layers=1, batch_first=True)
+        # print("After Shape: ", x.shape)
 
-        # Final dense layer for steering angle
-        self.final_dense_sa = nn.Sequential(
-            nn.Linear(in_features=64, out_features=32),
-            nn.ReLU(),
-            nn.Linear(in_features=32, out_features=2),
-        )
+        # Apply self-attention with residual connection and layer normalization
+        attn_output, _ = self.self_attn(x, x, x)
+        attn_output = Fu.layer_norm(x + attn_output, [attn_output.shape[-1]])
+        # print("Attention Shape: ", attn_output.shape)
 
-        # Final dense layer for acceleration
-        self.final_dense_acc = nn.Sequential(
-            nn.Linear(in_features=64, out_features=32),
-            nn.ReLU(),
-            nn.Linear(in_features=32, out_features=2),
-        )
+        # Reshape the self-attention output to match the LSTM input shape
+        # Shape: (batch size, sequence length, embedding dimension)
+        attn_output = attn_output.permute(0, 2, 1)
+        # print("After Shape: ", attn_output.shape)
 
-    def forward(self, x_vec, x_img):
-        # Image processing
-        x_img = self.conv(x_img)
-        # print(x_img.ndim)
-        if x_img.ndim == 3:
-            # print("Single Input")
-            x_img = torch.flatten(x_img)
-        if x_img.ndim == 4:
-            # print("Batch Input")
-            x_img = torch.flatten(x_img, start_dim=1)
-        # Processing state
-        x_vec = Fu.relu(self.fc1(x_vec))
-        x_vec = Fu.relu(self.fc2(x_vec))
+        # # LSTM layer
+        # x = x.unsqueeze(0)  # Add sequence length dimension
+        lstm_output, _ = self.lstm(attn_output)
+        lstm_output = lstm_output.squeeze(0)  # Remove sequence length dimension
 
-        x = 0
-        if x_img.ndim == 1:
-            x = torch.cat((x_img, x_vec))
-        if x_img.ndim == 2:
-            x = torch.cat((x_img, x_vec), dim=1)
+        # Flatten lstm output
+        lstm_output = self.avg_pool(lstm_output)
+        # print("LSTM Output Shape: ", lstm_output.shape)
+        if lstm_output.ndim == 2:
+            lstm_output = torch.flatten(lstm_output)
+        else:
+            lstm_output = torch.flatten(lstm_output, start_dim=1)
+        # print("LSTM Output Shape: ", lstm_output.shape)
 
-        x = self.linear_attn(x)
-
-        # Output alpha and beta value for steering angle and acceleration to be used in Beta distribution
-        ba_sa = torch.exp(self.final_dense_sa(x))
-        ba_sa = 1 + ba_sa
-        ba_acc = torch.exp(self.final_dense_acc(x))
-        ba_acc = 1 + ba_acc
+        ba_sa = self.fc_sa(lstm_output) + 1.0
+        ba_acc = self.fc_acc(lstm_output) + 1.0
         return ba_sa, ba_acc
 
 
 class QValueApproximation(nn.Module):
-    def __init__(self, state_size, joined_actions_size):
+    """
+    Q-value approximation network
+    input_size: size of input
+    hidden_size: size of hidden layer
+    num_layers: number of hidden layers
+    output_size: size of output
+    """
+
+    def __init__(self, input_size, hidden_size, num_layers):
         super().__init__()
-        self.fc1 = nn.Linear(in_features=state_size + joined_actions_size, out_features=64)
-        self.fc2 = nn.Linear(in_features=64, out_features=32)
-        self.fc3 = nn.Linear(in_features=32, out_features=1)
+        layers = [nn.Linear(in_features=input_size, out_features=hidden_size), nn.ReLU()]
+        for _ in range(num_layers - 1):
+            layers.append(nn.Linear(in_features=hidden_size, out_features=hidden_size))
+            layers.append(nn.Tanh())
+        layers.append(nn.Linear(in_features=hidden_size, out_features=1))
+
+        self.fc = nn.Sequential(*layers)
 
     def forward(self, joined_state_action):
-        x = Fu.relu(self.fc1(joined_state_action))
-        x = Fu.relu(self.fc2(x))
-        x = Fu.tanh(self.fc3(x))
+        x = self.fc(joined_state_action)
         return x
