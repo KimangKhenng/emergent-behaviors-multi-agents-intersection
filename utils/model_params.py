@@ -48,10 +48,21 @@ from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
 from torchsummary import summary
 import torch
 
+print("============================================================================================")
+# set device to cpu or cuda
+device = torch.device('cpu')
+if torch.cuda.is_available():
+    device = torch.device('cuda:0')
+    torch.cuda.empty_cache()
+    print("Device set to : " + str(torch.cuda.get_device_name(device)))
+else:
+    print("Device set to : cpu")
+print("============================================================================================")
+
 if __name__ == '__main__':
     env = SingleAgentInterLidarEnv()
     obs = env.reset()
-    state = torch.from_numpy(obs)
+    state = torch.from_numpy(obs).to(device)
 
     K_epochs = 5  # update policy for K epochs in one PPO update
     batch_size = 512  # training batch size
@@ -62,7 +73,11 @@ if __name__ == '__main__':
     lr_actor = 0.0003  # learning rate for actor network
     lr_critic = 0.001  # learning rate for critic network
 
-    ppo_agent = SinglePPOClipMLPBetaAgent(state_size=259,
+    state_dim = env.observation_space.shape[0]
+
+    action_dim = env.action_space.shape[0]
+
+    ppo_agent = SinglePPOClipMLPBetaAgent(state_size=state_dim,
                                           batch_size=batch_size,
                                           lr_actor=lr_actor,
                                           lr_critic=lr_critic,
@@ -70,17 +85,12 @@ if __name__ == '__main__':
                                           k_epochs=K_epochs,
                                           eps_clip=eps_clip,
                                           hidden_size=256,
-                                          num_layers=2,
-                                          hidden_size_2=128,
-                                          num_layers_2=2,
-                                          output_size=2,
-                                          action_size=2,
-                                          critics_hidden_size=120,
-                                          critics_num_layers=2,
+                                          action_size=action_dim,
                                           )
     print("==========================================================================================")
     print("Single Batch Summary: ")
     summary(ppo_agent.policy.actor, [state])
+
     # Testing with Batch Data
     # batch_images = torch.randn(50, 5, 100, 100)
     # batch_states = torch.randn(50, 19)

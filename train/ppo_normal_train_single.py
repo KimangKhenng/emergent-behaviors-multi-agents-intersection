@@ -8,6 +8,17 @@ import numpy as np
 
 from algos.single.ppo_clip_mlp_normal import SinglePPOClipMLPNormalAgent
 from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
+import json
+import zipfile
+import glob
+
+
+def zip_directory(directory_path, zip_file_path):
+    with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(directory_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                zipf.write(file_path, arcname=os.path.relpath(file_path, directory_path))
 
 
 ################################### Training ###################################
@@ -15,12 +26,12 @@ def train():
     print("============================================================================================")
 
     ####### initialize environment hyperparameters ######
-    env_name = "SingleAgentIntersection-MLP-v0"
+    env_name = "SingleAgentIntersection-MLP-v1"
 
     has_continuous_action_space = True  # continuous action space; else discrete
 
     max_ep_len = 1000  # max timesteps in one episode
-    max_training_timesteps = int(1e7)  # break training loop if timeteps > max_training_timesteps
+    max_training_timesteps = int(1e6)  # break training loop if timeteps > max_training_timesteps
 
     print_freq = max_ep_len * 3  # print avg reward in the interval (in num timesteps)
     log_freq = max_ep_len * 2  # log avg reward in the interval (in num timesteps)
@@ -30,6 +41,8 @@ def train():
     action_std_decay_rate = 0.05  # linearly decay action_std (action_std = action_std - action_std_decay_rate)
     min_action_std = 0.1  # minimum action_std (stop decay after action_std <= min_action_std)
     action_std_decay_freq = int(2.5e5)  # action_std decay frequency (in num timesteps)
+    hidden_size = 256
+    numbers_of_models_to_save = max_training_timesteps // save_model_freq
     #####################################################
 
     ## Note : print/log frequencies should be > than max_ep_len
@@ -51,6 +64,8 @@ def train():
 
     env = SingleAgentInterLidarEnv()
 
+    action_dim = env.action_space.shape[0]
+
     # state space dimension
     state_dim = env.observation_space.shape[0]
 
@@ -71,13 +86,51 @@ def train():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
+    """
+    Dumping the config file into the log directory
+    """
+    train_config = {
+        "env_name": env_name,
+        "max_ep_len": max_ep_len,
+        "max_training_timesteps": max_training_timesteps,
+        "print_freq": print_freq,
+        "log_freq": log_freq,
+        "save_model_freq": save_model_freq,
+        "update_timestep": update_timestep,
+        "numbers_of_models_to_save": numbers_of_models_to_save,
+    }
+    ppo_config = {
+        "K_epochs": K_epochs,
+        "eps_clip": eps_clip,
+        "gamma": gamma,
+        "lr_actor": lr_actor,
+        "lr_critic": lr_critic,
+        "action_std": 0.6,
+        "action_std_decay_rate": 0.05,
+        "min_action_std": 0.1,
+        "action_std_decay_freq": int(2.5e5),
+    }
+    policy_config = {
+        "hidden_size": hidden_size,
+        "action_size": action_dim,
+    }
+    config = dict({
+        "train_config": train_config,
+        "ppo_config": ppo_config,
+        "policy_config": policy_config,
+    })
+    # print("config : ", config)
+    log_json_file = log_dir + '/config.json'
+    with open(log_json_file, "w") as outfile:
+        json.dump(config, outfile)
+
     #### get number of log files in log directory
     run_num = 0
     current_num_files = next(os.walk(log_dir))[2]
     run_num = len(current_num_files) - 1
 
     #### create new log file for each run
-    log_f_name = log_dir + '/PPO_' + env_name + "_log_" + str(run_num) + ".csv"
+    log_f_name = log_dir + '/PPO_' + env_name + "_log_reward_" + str(run_num) + ".csv"
 
     print("current logging run number for " + env_name + " : ", run_num)
     print("logging at : " + log_f_name)
@@ -94,7 +147,8 @@ def train():
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    checkpoint_path = directory + "PPO_{}_{}_{}.pth".format(env_name, random_seed, run_num_pretrained)
+    save_iteration = 0
+    checkpoint_path = directory + "PPO_{}_{}.pth".format(env_name, save_iteration)
     print("save checkpoint path : " + checkpoint_path)
     #####################################################
 
@@ -226,6 +280,8 @@ def train():
                 print("--------------------------------------------------------------------------------------------")
                 print("saving model at : " + checkpoint_path)
                 ppo_agent.save(checkpoint_path)
+                save_iteration += 1
+                checkpoint_path = directory + "PPO_{}_{}.pth".format(env_name, save_iteration)
                 print("model saved")
                 print("Elapsed Time  : ", datetime.now().replace(microsecond=0) - start_time)
                 print("--------------------------------------------------------------------------------------------")
@@ -250,16 +306,14 @@ def train():
     end_time = datetime.now().replace(microsecond=0)
     print("Started training at (GMT) : ", start_time)
     print("Finished training at (GMT) : ", end_time)
+    checkpoint_path = directory + "PPO_{}_{}.pth".format(env_name, "final")
+    print("saving model at : " + checkpoint_path)
+    ppo_agent.save(checkpoint_path)
+    # print("Ziping the model")
+    # zip_directory(directory, directory + "PPO_{}_{}.zip".format(env_name, end_time))
     print("Total training time  : ", end_time - start_time)
     print("============================================================================================")
 
 
 if __name__ == '__main__':
     train()
-
-
-
-
-
-
-

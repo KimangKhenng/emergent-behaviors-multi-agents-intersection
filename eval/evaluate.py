@@ -12,18 +12,18 @@ from algos.single.ppo_clip_mlp_normal import SinglePPOClipMLPNormalAgent
 # from envs.single_agent_intersection import SingleAgentInterEnv, STATE_DIM
 from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
 import matplotlib.pyplot as plt
-import numpy as np
+
 
 #################################### Testing ###################################
 def test():
     print("============================================================================================")
 
-    env_name = "SingleAgentsIntersection"
+    env_name = "PPO-Clip_Beta-Multi-Intersection-4"
     has_continuous_action_space = True
     max_ep_len = 1000  # max timesteps in one episode
-    action_std = 0.4  # set same std for action distribution which was used while saving
+    action_std = 0.1  # set same std for action distribution which was used while saving
 
-    render = False  # render environment on screen
+    render = True  # render environment on screen
     frame_delay = 0  # if required; add delay b/w frames
 
     total_test_episodes = 100  # total num of testing episodes
@@ -49,33 +49,33 @@ def test():
         action_dim = env.action_space.n
 
     # initialize a PPO agent
-    ppo_agent = SinglePPOClipMLPNormalAgent(
-        state_dim,
-        action_dim,
-        lr_actor,
-        lr_critic,
-        gamma,
-        K_epochs,
-        eps_clip,
-        has_continuous_action_space,
-        action_std)
+    # ppo_agent = SinglePPOClipMLPNormalAgent(
+    #     state_dim,
+    #     action_dim,
+    #     lr_actor,
+    #     lr_critic,
+    #     gamma,
+    #     K_epochs,
+    #     eps_clip,
+    #     has_continuous_action_space,
+    #     action_std)
 
-    # ppo_agent = SPPOClipMLPBeta(state_dim=state_dim,
-    #                             lr_actor=lr_actor,
-    #                             lr_critic=lr_critic,
-    #                             gamma=gamma,
-    #                             K_epochs=K_epochs,
-    #                             eps_clip=eps_clip,
-    #                             hidden_dim=hidden_size,
-    #                             action_dim=action_dim,
-    #                             )
+    ppo_agent = SPPOClipMLPBeta(state_dim=state_dim,
+                                lr_actor=lr_actor,
+                                lr_critic=lr_critic,
+                                gamma=gamma,
+                                K_epochs=K_epochs,
+                                eps_clip=eps_clip,
+                                hidden_dim=hidden_size,
+                                action_dim=action_dim,
+                                )
 
     # preTrained weights directory
 
     random_seed = 0  #### set this to load a particular checkpoint trained on random seed
     run_num_pretrained = 0  #### set this to load a particular checkpoint num
 
-    directory = "PPO_preTrained" + '/' + env_name + '/'
+    directory = "./PPO_preTrained" + '/' + env_name + '/'
     checkpoint_path = directory + "PPO_{}_{}_{}.pth".format(env_name, random_seed, run_num_pretrained)
     print("loading network from : " + checkpoint_path)
 
@@ -146,8 +146,6 @@ def test():
     plt.ylabel('Success Rate')
     plt.title('Success Rate over Episodes')
     plt.show()
-    arr = np.asarray(success_rate)
-    arr.tofile('success_GUSSIAN.csv', sep=',')
 
     # Plotting safety rate
     plt.plot(safety_rate)
@@ -155,8 +153,6 @@ def test():
     plt.ylabel('Safety Rate')
     plt.title('Safety Rate over Episodes')
     plt.show()
-    arr = np.asarray(safety_rate)
-    arr.tofile('safety_rate_GUSSAIN.csv', sep=',')
 
 
 if __name__ == '__main__':

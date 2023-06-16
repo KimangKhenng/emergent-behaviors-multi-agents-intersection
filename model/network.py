@@ -239,6 +239,63 @@ class MLPPolicy(nn.Module):
         return ba_sa, ba_acc
 
 
+class BetaPolicy(nn.Module):
+    def __init__(self, input_size, hidden_size, action_size):
+        super().__init__()
+        self.actor = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.LeakyReLU(),
+            # nn.BatchNorm1d(hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.LeakyReLU(),
+            # nn.BatchNorm1d(hidden_size),
+        )
+
+        self.alpha = nn.Sequential(
+            nn.Linear(hidden_size, action_size, bias=False),
+            nn.Softplus(),
+        )
+
+        self.beta = nn.Sequential(
+            nn.Linear(hidden_size, action_size, bias=False),
+            nn.Softplus(),
+        )
+
+        self.critic = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 1)
+        )
+
+    def forward(self):
+        raise NotImplementedError
+
+    def act(self, state):
+        alpha = self.alpha(self.actor(state)) + 1.0
+        beta = self.beta(self.actor(state)) + 1.0
+        # policy distribution - using Beta here which is a lot more efficient than Gaussian
+        policy_dist = torch.distributions.Beta(alpha, beta)
+        action = policy_dist.sample()
+        log_prob = policy_dist.log_prob(action).sum(-1).unsqueeze(-1)
+        state_val = self.critic(state)
+        return action.detach(), log_prob.detach(), state_val.detach()
+
+    def evaluate(self, state, action):
+        alpha = self.alpha(self.actor(state)) + 1.0
+        beta = self.beta(self.actor(state)) + 1.0
+        # policy distribution - using Beta here which is a lot more efficient than Gaussian
+
+        dist = torch.distributions.Beta(alpha, beta)
+
+        action_logprobs = dist.log_prob(action)
+        dist_entropy = dist.entropy()
+        state_values = self.critic(state)
+
+        return action_logprobs, state_values, dist_entropy
+
+
 class QValueApproximation(nn.Module):
     """
     Q-value approximation network

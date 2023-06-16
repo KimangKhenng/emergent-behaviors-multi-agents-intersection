@@ -10,12 +10,12 @@ import cv2
 def get_env_info_single(env):
     obs = env.reset()
 
-    for step in range(1000):
-        action = env.action_space.sample()
-        obs, r, d, i = env.step(action)
+    # for step in range(1000):
+    #     action = env.action_space.sample()
+    #     obs, r, d, i = env.step(action)
     print("Obs: ", obs)
     print("State Length: ", obs.shape)
-    print("Env Info: ", i)
+    # print("Env Info: ", i)
     print("Action Space", env.action_space.shape)
     # print("Image Shape: ", o['image'].shape)
     # print("Env Info: ", i)

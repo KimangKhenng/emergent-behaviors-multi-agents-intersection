@@ -1,25 +1,29 @@
 from datetime import datetime
 import os
-import torch
-import numpy as np
 
-from algos.single.ppo_clip_mlp_beta_torch import SinglePPOClipMLPBetaAgent
-# from torch.utils.tensorboard import SummaryWriter
-from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv, lidar_config
+from algos.single.ppo_clip_mlp_beta import SPPOClipMLPBeta
+
+from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
 import json
-import pprint
+import zipfile
+import glob
 
 
-# writer = SummaryWriter()
+def zip_directory(directory_path, zip_file_path):
+    with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(directory_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                zipf.write(file_path, arcname=os.path.relpath(file_path, directory_path))
 
 
 def train():
     """
     initialize environment hyperparameters
     """
-    env_name = "SingleAgentIntersection-MLP-Beta-v0"
+    env_name = "SingleAgentIntersection-MLP-Beta-v1"
     max_ep_len = 1000  # max timesteps in one episode
-    max_training_timesteps = int(1e7)  # break training loop if timeteps > max_training_timesteps
+    max_training_timesteps = int(1e6)  # break training loop if timeteps > max_training_timesteps
 
     print_freq = max_ep_len * 3  # print avg reward in the interval (in num timesteps)
     log_freq = max_ep_len * 2  # log avg reward in the interval (in num timesteps)
@@ -32,7 +36,6 @@ def train():
     """
     # update_timestep = 100  # update policy every n timesteps
     K_epochs = 5  # update policy for K epochs in one PPO update
-    batch_size = 256  # training batch size
 
     eps_clip = 0.2  # clip parameter for PPO
     gamma = 0.99  # discount factor
@@ -40,24 +43,20 @@ def train():
     lr_actor = 0.0003  # learning rate for actor network
     lr_critic = 0.001  # learning rate for critic network
 
-    random_seed = 100  # set random seed if required (0 = no random seed)
-
     """
     Policy Parameters
     """
     hidden_size = 256
-    num_layers = 2
-    hidden_size_2 = 128
-    num_layers_2 = 2
-    output_size = 2
     action_size = 2
-    critics_hidden_size = 500
-    critics_num_layers = 2
 
     """
     Make Enviorment
     """
     env = SingleAgentInterLidarEnv()
+
+    state_dim = env.observation_space.shape[0]
+
+    action_dim = env.action_space.shape[0]
 
     ###################### logging ######################
 
@@ -85,7 +84,6 @@ def train():
     }
     ppo_config = {
         "K_epochs": K_epochs,
-        "batch_size": batch_size,
         "eps_clip": eps_clip,
         "gamma": gamma,
         "lr_actor": lr_actor,
@@ -93,20 +91,14 @@ def train():
     }
     policy_config = {
         "hidden_size": hidden_size,
-        "num_layers": num_layers,
-        "hidden_size_2": hidden_size_2,
-        "num_layers_2": num_layers_2,
-        "output_size": output_size,
         "action_size": action_size,
-        "critics_hidden_size": critics_hidden_size,
-        "critics_num_layers": critics_num_layers,
     }
     config = dict({
         "train_config": train_config,
         "ppo_config": ppo_config,
         "policy_config": policy_config,
     })
-    print("config : ", config)
+    # print("config : ", config)
     log_json_file = log_dir + '/config.json'
     with open(log_json_file, "w") as outfile:
         json.dump(config, outfile)
@@ -159,7 +151,6 @@ def train():
     print("--------------------------------------------------------------------------------------------")
     print("optimizer learning rate actor : ", lr_actor)
     print("optimizer learning rate critic : ", lr_critic)
-    print("Training batch size : ", batch_size)
     ####################################################
 
     print("============================================================================================")
@@ -167,22 +158,15 @@ def train():
     ################# training procedure ################
 
     # initialize a PPO agent
-    ppo_agent = SinglePPOClipMLPBetaAgent(state_size=259,
-                                          batch_size=batch_size,
-                                          lr_actor=lr_actor,
-                                          lr_critic=lr_critic,
-                                          gamma=gamma,
-                                          k_epochs=K_epochs,
-                                          eps_clip=eps_clip,
-                                          hidden_size=hidden_size,
-                                          num_layers=num_layers,
-                                          hidden_size_2=hidden_size_2,
-                                          num_layers_2=num_layers_2,
-                                          output_size=output_size,
-                                          action_size=action_size,
-                                          critics_hidden_size=critics_hidden_size,
-                                          critics_num_layers=critics_num_layers,
-                                          )
+    ppo_agent = SPPOClipMLPBeta(state_dim=state_dim,
+                                lr_actor=lr_actor,
+                                lr_critic=lr_critic,
+                                gamma=gamma,
+                                K_epochs=K_epochs,
+                                eps_clip=eps_clip,
+                                hidden_dim=hidden_size,
+                                action_dim=action_dim,
+                                )
 
     # track total training time
     start_time = datetime.now().replace(microsecond=0)
@@ -216,32 +200,17 @@ def train():
 
         for t in range(1, max_ep_len + 1):
             actions = ppo_agent.select_action(obs)
-            # print("State Size: ", len(ppo_agent.rollout_buffer.states))
-            # print("actions : ", actions)
-            # actions = envs.action_space.sample()
-            # print("Action : ", actions)
-            obs, r, d, i = env.step(actions)
-            # print(len(obs))
-            # print("rewards : ", r)
-            # print("done : ", d)
-            env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=True, screen_size=(1000, 1000))
-            # print(d)
+            # beta distribution outputs actions between 0-1 and this converts them to -1,1 range
+            # actions = 2.0 * actions - 1.0
 
-            # saving reward and is_terminals
-            ppo_agent.rollout_buffer.add_reward(r)
-            ppo_agent.rollout_buffer.add_terminated(d)
-            # ppo_agent.rollout_buffer.add_next_state_action_values(obs)
-            #
+            obs, r, d, i = env.step(actions)
+            # env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=True, screen_size=(1000, 1000))
+
+            ppo_agent.buffer.rewards.append(r)
+            ppo_agent.buffer.is_terminals.append(d)
+
             time_step += 1
             current_ep_reward += r
-            # writer.add_scalar("time/reward", time_step, current_ep_reward)
-            # print("current_ep_reward : ", current_ep_reward)
-            # print("time_step : ", time_step)
-            # for agent_name, info in i.items():
-            #     if info['arrive_dest']:
-            #         total_successes += 1
-
-            # success_rates.append(success_rate)
 
             # update PPO agent
             if time_step % update_timestep == 0:
@@ -285,7 +254,6 @@ def train():
 
             # break; if the episode is over
             if d:
-                # writer.flush()
                 break
 
         print_running_reward += current_ep_reward
@@ -307,6 +275,8 @@ def train():
     checkpoint_path = directory + "PPO_{}_{}.pth".format(env_name, "final")
     print("saving model at : " + checkpoint_path)
     ppo_agent.save(checkpoint_path)
+    # print("Ziping the model")
+    # zip_directory(directory, directory + "PPO_{}_{}.zip".format(env_name, end_time))
     print("Total training time  : ", end_time - start_time)
     print("============================================================================================")
 
