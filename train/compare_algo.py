@@ -91,8 +91,8 @@ def save_graph():
     ax.axhline(y=solving_threshold, color='black', linewidth=1, linestyle='--', label="Solving Threshold")
     ax.grid(color='gray', linestyle='-', linewidth=1, alpha=0.2)
 
-    ax.set_xlabel("Timesteps", fontsize=12)
-    ax.set_ylabel("Average Rewards", fontsize=12)
+    ax.set_xlabel("Timesteps", fontsize=14)
+    ax.set_ylabel("Average Rewards", fontsize=14)
 
     # ax.legend(new_handles, new_labels, loc=4)
     handles, labels = ax.get_legend_handles_labels()
@@ -106,7 +106,7 @@ def save_graph():
             new_labels.append(labels[i])
     ax.legend(new_handles, new_labels, loc=4)
 
-    plt.title("SingleIntersection-MLP-V1", fontsize=14)
+    plt.title("SingleIntersection-MLP-V1", fontsize=16)
 
     fig = plt.gcf()
     fig.set_size_inches(fig_width, fig_height)
