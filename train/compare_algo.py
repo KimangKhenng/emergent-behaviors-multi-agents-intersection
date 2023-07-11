@@ -8,8 +8,8 @@ def save_graph():
     # env_name = 'CartPole-v1'
     # env_name = 'LunarLander-v2'
     # env_name = 'BipedalWalker-v2'
-    env_1 = 'SingleAgentIntersection-MLP-Beta-v1'
-    env_2 = 'SingleAgentIntersection-MLP-v1'
+    env_1 = 'Multi-Intersection-PPO-Clip_Beta-v1'
+    env_2 = 'Multi-Intersection-PPO-Clip_Normal-v1'
 
     envs = [env_1, env_2]
 
@@ -88,7 +88,7 @@ def save_graph():
 
     # keep alternate elements (reward_smooth_i) in the legend
 
-    ax.axhline(y=solving_threshold, color='black', linewidth=1, linestyle='--', label="Solving Threshold")
+    # ax.axhline(y=solving_threshold, color='black', linewidth=1, linestyle='--', label="Solving Threshold")
     ax.grid(color='gray', linestyle='-', linewidth=1, alpha=0.2)
 
     ax.set_xlabel("Timesteps", fontsize=14)
@@ -106,7 +106,7 @@ def save_graph():
             new_labels.append(labels[i])
     ax.legend(new_handles, new_labels, loc=4)
 
-    plt.title("SingleIntersection-MLP-V1", fontsize=16)
+    plt.title("Multi Agent Intersection-MLP-V1", fontsize=16)
 
     fig = plt.gcf()
     fig.set_size_inches(fig_width, fig_height)

@@ -1,7 +1,8 @@
-import numpy as np
 import torch
 import torch.nn as nn
-from torch.distributions import Beta
+
+from algos.utils.reward import generalized_advantage_estimation, monte_carlo_state_rewards
+from model.network import BetaPolicy
 
 ################################## set device ##################################
 print("============================================================================================")
@@ -33,80 +34,6 @@ class RolloutBuffer:
         del self.rewards[:]
         del self.state_values[:]
         del self.is_terminals[:]
-
-
-class BetaPolicy(nn.Module):
-    def __init__(self, input_size, hidden_size, action_size):
-        super().__init__()
-        self.actor = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
-            nn.Tanh(),
-            # nn.BatchNorm1d(hidden_size),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-            # nn.BatchNorm1d(hidden_size),
-        )
-
-        self.alpha = nn.Sequential(
-            nn.Linear(hidden_size, action_size, bias=True),
-            nn.Softplus()
-        )
-        # self.alpha.weight.data.mul_(0.125)
-
-        self.beta = nn.Sequential(
-            nn.Linear(hidden_size, action_size, bias=True),
-            nn.Softplus()
-        )
-        # self.beta.weight.data.mul_(0.125)
-
-        self.critic = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, 1)
-        )
-
-    def forward(self):
-        raise NotImplementedError
-
-    def act(self, state):
-        ab_sa = self.alpha(self.actor(state)) + 1.0
-        ab_acc = self.beta(self.actor(state)) + 1.0
-
-        sa_dist = Beta(ab_sa[0], ab_sa[1])
-        acc_dist = Beta(ab_acc[0], ab_acc[1])
-
-        sa_action = 2.0 * sa_dist.sample() - 1.0
-        acc_action = 2.0 * acc_dist.sample() - 1.0
-
-        sa_logprobs = sa_dist.log_prob((sa_action + 1.0) / 2.0)
-        acc_logprobs = acc_dist.log_prob((acc_action + 1.0) / 2.0)
-        logprobls = (sa_logprobs, acc_logprobs)
-
-        state_val = self.critic(state)
-        return np.array([sa_action.detach().cpu().numpy(), acc_action.detach().cpu().numpy()]), logprobls, state_val
-
-    def evaluate(self, state, actions):
-        ab_sa = self.alpha(self.actor(state)) + 1.0
-        ab_acc = self.beta(self.actor(state)) + 1.0
-
-        sa_dist = Beta(ab_sa[:, 0], ab_sa[:, 1])
-        acc_dist = Beta(ab_acc[:, 0], ab_acc[:, 1])
-
-        sa_logprobs = sa_dist.log_prob((actions[:, 0] + 1.0) / 2)
-        sa_dist_entropy = sa_dist.entropy()
-        # print("SA logprobs: ", sa_logprobs)
-
-        acc_logprobs = acc_dist.log_prob((actions[:, 1] + 1.0) / 2)
-        acc_dist_entropy = acc_dist.entropy()
-
-        action_state_value = self.critic(state)
-
-        logprobs = torch.cat([sa_logprobs.unsqueeze(1), acc_logprobs.unsqueeze(1)], dim=1)
-        dist_entropy = torch.cat([sa_dist_entropy.unsqueeze(1), acc_dist_entropy.unsqueeze(1)], dim=1)
-
-        return logprobs, dist_entropy, action_state_value
 
 
 class SPPOClipMLPBeta:
@@ -143,13 +70,7 @@ class SPPOClipMLPBeta:
 
     def update(self):
         # Monte Carlo estimate of returns
-        rewards = []
-        discounted_reward = 0
-        for reward, is_terminal in zip(reversed(self.buffer.rewards), reversed(self.buffer.is_terminals)):
-            if is_terminal:
-                discounted_reward = 0
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            rewards.insert(0, discounted_reward)
+        rewards = monte_carlo_state_rewards(self.buffer.rewards, self.buffer.is_terminals, self.gamma)
 
         # Normalizing the rewards
         rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
@@ -177,7 +98,7 @@ class SPPOClipMLPBeta:
             ratios = torch.exp(logprobs - old_logprobs.detach())
 
             # Finding Surrogate Loss
-            # print(ratios.shape, advantages.shape)
+            print(ratios.shape, advantages.shape)
             advantages = advantages.unsqueeze(1)
             surr1 = ratios * advantages
             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages

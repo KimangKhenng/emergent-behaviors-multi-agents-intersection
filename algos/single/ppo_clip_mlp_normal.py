@@ -230,6 +230,8 @@ class SinglePPOClipMLPNormalAgent:
 
             # Finding the ratio (pi_theta / pi_theta__old)
             ratios = torch.exp(logprobs - old_logprobs.detach())
+            print(ratios.shape)
+            print(advantages.shape)
 
             # Finding Surrogate Loss
             surr1 = ratios * advantages

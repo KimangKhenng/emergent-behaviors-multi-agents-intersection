@@ -2,6 +2,7 @@ import random
 import matplotlib.pyplot as plt
 
 from envs.multi_agents import MultiAgentsInterEnv
+from envs.multi_agents_lidar import MultiAgentsLidarEnv
 from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
 
 import cv2
@@ -34,16 +35,12 @@ def get_env_info_marl(env):
         a[-1] = 1.0
     obs, r, d, i = env.step(action)
 
-    print("State Length: ", obs['agent0']['state'].shape)
-    print("Image Shape: ", obs['agent1']['image'].shape)
+    print("State Length: ", obs['agent0'].shape)
     print("Env Info: ", i['agent0'])
-    cv2.imshow('img', obs['agent3']['image'][..., -1])
-
-    # Show the plot
-    cv2.waitKey(0)
 
 
 if __name__ == '__main__':
-    # env = MultiAgentsInterEnv(num_agents=8)
-    env = SingleAgentInterLidarEnv()
-    get_env_info_single(env)
+    env = MultiAgentsLidarEnv()
+    # env = SingleAgentInterLidarEnv()
+    # get_env_info_single(env)
+    get_env_info_marl(env)

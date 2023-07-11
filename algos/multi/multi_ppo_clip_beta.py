@@ -1,3 +1,4 @@
+import itertools
 import math
 from collections import OrderedDict
 
@@ -6,8 +7,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from model.central_actor_critics import CentralActorCritics
-from model.indi_actor_critics import IndividualActorCritics
+from algos.multi.buffer import Buffer
+from algos.utils.reward import monte_carlo_state_rewards, generalized_advantage_estimation, meanfield_approximation
+from model.network import JoinedBetaPolicy
 
 ################################## set device ##################################
 print("============================================================================================")
@@ -22,145 +24,31 @@ else:
 print("============================================================================================")
 
 
-def get_available_agents(rewards, dones):
-    # Check the number of agents available in both reward and done
-    available_agents = set(rewards[0].keys()).intersection(set(dones[0].keys()))
-    return list(available_agents)
-
-
-def get_agent_info(agent_name, rewards, dones):
-    # Check the number of agents available only if each agent is available in both reward and done
-    available_agents = set(rewards[0].keys()).intersection(set(dones[0].keys()))
-    if agent_name not in available_agents:
-        print(f"Agent '{agent_name}' is not available in the data")
-        return None
-
-    # Extract the reward and done condition for the specified agent
-    reward_agent = []
-    done_agent = []
-    for t in range(len(rewards)):
-        if agent_name in rewards[t] and agent_name in dones[t]:
-            reward_agent.append(rewards[t][agent_name])
-            done_agent.append(dones[t][agent_name])
-        else:
-            print(f"Missing data for agent '{agent_name}' at time step {t}")
-            return None
-
-    return reward_agent, done_agent
-
-
-def get_joined_action_state(actions, state):
-    joined_states = OrderedDict()
-    for key in state.keys():
-        joined_states[key] = state[key]['state']
-    arrays = [v for k, v in actions.items()]  # extract arrays using a list comprehension
-    concat_actions = np.concatenate(arrays)  # concatenate arrays into a single array
-    arrays = [v for k, v in joined_states.items()]
-    concat_states = np.concatenate(arrays)
-    joined_actions_states = np.concatenate((concat_actions, concat_states))
-    joined_actions_states = torch.from_numpy(joined_actions_states).to(device)
-    # print("joined_actions_states.shape: ", joined_actions_states.shape)
-    # if joined_actions_states.shape[0] < 84:
-    #     padding = (0, 84 - joined_actions_states.shape[0])
-    #     joined_actions_states = torch.nn.functional.pad(joined_actions_states, padding)
-    return joined_actions_states
-
-
-class RolloutBuffer:
-    def __init__(self):
-        self.actions = []
-        self.states = []
-        self.next_states = []
-        self.front_views = []
-        self.next_front_views = []
-        self.rewards = []
-        self.logprobs = []
-        self.state_action_values = []
-        self.joined_action_state = []
-        self.is_terminated = []
-
-    def add_next_state_action_values(self, actions, state):
-        joined_actions_states = get_joined_action_state(actions, state)
-        self.joined_action_state.append(joined_actions_states)
-
-    def add_reward(self, rewards_dict, num_agent):
-        if len(rewards_dict) != num_agent:
-            all_agent_names = [f'agent{i}' for i in range(num_agent)]
-            for agent_name in all_agent_names:
-                if agent_name not in rewards_dict.keys():
-                    rewards_dict[agent_name] = 0
-        # Extract the reward values and maintain chronological order
-        # rewards_list = [rewards_dict[f'agent{i}'] for i in range(len(rewards_dict))]
-        # print(rewards_dict)
-        rewards_list = [i for i in rewards_dict.values()]
-        self.rewards.extend(rewards_list)
-
-    def add_terminated(self, terminated_dict, num_agent):
-        if len(terminated_dict) - 1 != num_agent:
-            all_agent_names = [f'agent{i}' for i in range(num_agent)]
-            for agent_name in all_agent_names:
-                if agent_name not in terminated_dict.keys():
-                    terminated_dict[agent_name] = True
-        # Extract the done values and maintain chronological order
-        # print(terminated_dict)
-        # terminated_list = [terminated_dict[f'agent{i}'] for i in range(len(terminated_dict) - 1)]
-        # print(terminated_dict)
-        terminated_list = [i for i in terminated_dict.values()]
-        self.is_terminated.extend(terminated_list)
-
-    # def add_state(self, state_dict, num_agent):
-    #     print(state_dict)
-    #     if len(state_dict) != num_agent:
-    #         all_agent_names = [f'agent{i}' for i in range(num_agent)]
-    #         for agent_name in all_agent_names:
-    #             if agent_name not in state_dict:
-    #                 state_dict[agent_name] = np.zeros(19)
-    #     # Extract the reward values and maintain chronological order
-    #     state_list = [state_dict[f'agent{i}'] for i in range(len(state_dict))]
-    #     self.states.append(state_list)
-
-    def add_actions(self, actions):
-        self.actions.extend(actions)
-
-    def add_state(self, state):
-        self.states.append(state)
-
-    def add_front_view(self, front_view):
-        self.front_views.extend(front_view)
-
-    def clear(self):
-        del self.actions[:]
-        del self.states[:]
-        del self.front_views[:]
-        del self.rewards[:]
-        del self.state_action_values[:]
-        del self.joined_action_state[:]
-        del self.is_terminated[:]
-        del self.logprobs[:]
-        del self.next_states[:]
-
-
 class MultiPPOClipBetaAgents(nn.Module):
     def __init__(
             self,
-            num_agents=8,
-            state_size=19,
-            joined_actions_size=0,
-            lr_actor=0.1,
-            lr_critic=0.1,
-            gamma=0.99,
-            k_epochs=10,
-            optim_batch_size=64,
-            eps_clip=0.2):
+            num_agents,
+            batch_size,
+            state_dim,
+            action_dim,
+            lr_actor,
+            lr_critic,
+            gamma,
+            K_epochs,
+            eps_clip,
+            hidden_dim
+    ):
         # Initialize the network and optimizer
         super().__init__()
         # Central Policy for learning
         self.num_agents = num_agents
-        self.K_epochs = k_epochs
-        self.optim_batch_size = optim_batch_size
+        self.K_epochs = K_epochs
+        self.batch_size = batch_size
         self.gamma = gamma
         self.eps_clip = eps_clip
-        self.central_policy = CentralActorCritics(state_size=state_size, num_agents=num_agents).to(device)
+        self.lambda_ = 0.95
+        self.central_policy = JoinedBetaPolicy(input_size=state_dim, action_size=action_dim, hidden_size=hidden_dim).to(
+            device)
         # Optimizer
         self.optimizer = torch.optim.Adam([
             {'params': self.central_policy.actor.parameters(), 'lr': lr_actor},
@@ -171,83 +59,85 @@ class MultiPPOClipBetaAgents(nn.Module):
 
         # Decentralized Policies
         self.decentralized_policies = OrderedDict(
-            ('agent{}'.format(i), IndividualActorCritics(state_size=state_size).to(device)) for i in range(num_agents))
+            ('agent{}'.format(i),
+             JoinedBetaPolicy(input_size=state_dim, action_size=action_dim, hidden_size=hidden_dim).to(device)) for i in
+            range(num_agents))
 
         for key in self.decentralized_policies.keys():
-            self.decentralized_policies[key].actor.load_state_dict(self.central_policy.actor.state_dict())
+            self.decentralized_policies[key].load_state_dict(self.central_policy.state_dict())
 
         # Mean Squared Error Loss
         self.MseLoss = nn.MSELoss()
 
         # Rollout Buffer
-        self.rollout_buffer = RolloutBuffer()
+        self.rollout_buffer = Buffer()
 
     # Select individual action
     def select_action(self, agent_name, states):
         # Assume that state is for individual agent with data type of dict with keys 'state' and 'image'
         with torch.no_grad():
-            state = torch.FloatTensor(states['state']).to(device)
-            rgb_camera = states['image']
-            front_view = torch.FloatTensor(rgb_camera).permute(2, 0, 1).unsqueeze(0).to(device)
+            state = torch.FloatTensor(states).to(device)
+            # rgb_camera = states['image']
+            # front_view = torch.FloatTensor(rgb_camera).permute(2, 0, 1).unsqueeze(0).to(device)
             action, logprobs = self.decentralized_policies[agent_name].act(
                 state=state,
-                front_view=front_view,
             )
             # action = [np.float32(item) for item in action]
             # print(action, type(action[0]))
             # print(mapped_action, type(mapped_action[0]))
-        self.rollout_buffer.states.append(state)
-        self.rollout_buffer.front_views.append(front_view)
+        # self.buffer.states.append(state)
+        # self.rollout_buffer.front_views.append(front_view)
         return action, logprobs
 
     def select_actions(self, states):
         # Assume that the state is the dictionary of states for all agents
+        joined_action = []
         actions = OrderedDict()
         logprobs = OrderedDict()
-        joined_states = OrderedDict()
-        # Loop through all agents by key
-        # print("Agents")
-        # print(states.keys())
+        states_values = OrderedDict()
+        state_action = OrderedDict()
         for key in states.keys():
-            # Select action for each agent
             action, logprob = self.select_action(key, states[key])
+            joined_action.append(action)
             actions[key] = action
             logprobs[key] = logprob
-            # joined_states[key] = states[key]['state']
-            # state roll out buffer
-            self.rollout_buffer.add_actions(torch.DoubleTensor(action))
-            self.rollout_buffer.logprobs.append(torch.Tensor(logprob))
+            # states_values[key] = state_val
 
-        joined_actions_states = get_joined_action_state(actions, states)
-        with torch.no_grad():
-            # print(joined_actions_states)
-            state_action_values = self.central_policy.critic(joined_actions_states)
+        for key in states.keys():
+            # contact states[key] and actions
+            joined_action = np.array(joined_action)
+            joined_action = joined_action.reshape(-1)
+            meanfield_action = meanfield_approximation(joined_action)
+            # if joined_action.size < 8:
+            #     # Calculate the amount of padding needed
+            #     pad_width = 8 - joined_action.size
+            #
+            #     # Pad the array with zeros
+            #     joined_action = np.pad(joined_action, (0, pad_width), mode='constant')
 
-        # print("state action values: ", state_action_values)
-        # Append to the rollout buffer
+            joined_state_action = np.append(states[key], meanfield_action)
+            joined_state_action = joined_state_action.astype(np.float32)
+            state_action[key] = joined_state_action
+            state_action_value = self.decentralized_policies[key].critic(
+                torch.tensor(joined_state_action).to(device))
+            states_values[key] = state_action_value
 
-        for _ in states.keys():
-            self.rollout_buffer.state_action_values.append(state_action_values)
-            self.rollout_buffer.joined_action_state.append(joined_actions_states)
-
-        # for a in actions.values():
-        #     a[-1] = 1.0
+        self.rollout_buffer.states.append(states)
+        self.rollout_buffer.actions.append(actions)
+        self.rollout_buffer.joined_actions_states.append(state_action)
+        self.rollout_buffer.logprobs.append(logprobs)
+        self.rollout_buffer.state_value.append(states_values)
         return actions
 
     def update(self):
+        self.rollout_buffer.rearrange()
         # Monte Carlo estimate of state rewards:
-        rewards = []
-        discounted_reward = 0
-        print("Reward Length")
-        print(len(self.rollout_buffer.rewards))
-        print("Termination Length")
-        print(len(self.rollout_buffer.is_terminated))
-        for reward, is_terminated in zip(reversed(self.rollout_buffer.rewards),
-                                         reversed(self.rollout_buffer.is_terminated)):
-            if is_terminated:
-                discounted_reward = 0
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            rewards.insert(0, discounted_reward)
+        # rewards = monte_carlo_state_rewards_v0(rewards=self.rollout_buffer.rewards,
+        #                                        termination_states=self.rollout_buffer.is_terminated,
+        #                                        gamma=self.gamma)
+        rewards = generalized_advantage_estimation(rewards=self.rollout_buffer.rewards,
+                                                   termination_states=self.rollout_buffer.is_terminated,
+                                                   gamma=self.gamma)
 
         # Normalizing the rewards
         rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
@@ -255,69 +145,62 @@ class MultiPPOClipBetaAgents(nn.Module):
 
         # print("State: ", self.rollout_buffer.states)
         # convert list to tensor
-        old_states = torch.squeeze(torch.stack(self.rollout_buffer.states, dim=0)).detach().to(device)
-        old_front_view = torch.squeeze(torch.stack(self.rollout_buffer.front_views, dim=0)).detach().to(device)
-        old_actions = torch.squeeze(torch.stack(self.rollout_buffer.actions, dim=0)).detach().to(device)
-        old_logprobs = torch.squeeze(torch.stack(self.rollout_buffer.logprobs, dim=0)).detach().to(device)
-        old_joined_actions_states = torch.squeeze(
-            torch.stack(self.rollout_buffer.joined_action_state, dim=0)).detach().to(device)
-        old_state_values = torch.squeeze(torch.stack(self.rollout_buffer.state_action_values, dim=0)).detach().to(
-            device)
+        old_states = torch.tensor(self.rollout_buffer.states).detach().to(device)
+        old_actions = torch.tensor(self.rollout_buffer.actions).detach().to(device)
+        old_joined_actions_states = torch.tensor(self.rollout_buffer.joined_actions_states).detach().to(device)
+        old_logprobs = torch.tensor(self.rollout_buffer.logprobs).detach().to(device)
+        # old_joined_actions_states = torch.squeeze(
+        #     torch.stack(self.buffer.joined_action_state, dim=0)).detach().to(device)
+        old_state_values = torch.squeeze(torch.stack(self.rollout_buffer.state_value, dim=0)).detach().to(device)
 
-        # print("Old State Values: ", old_state_values.shape)
-        # print("Rewards: ", rewards.shape)
-        # print("Old Frontview: ", old_front_view.shape)
-        # print("old_actions: ", old_actions.shape)
-        # print("old_joined_actions_states: ", old_joined_actions_states.shape)
-        # print("Old Value state: ", old_state_values.shape)
-        # calculate advantages
-        # advantages = rewards.detach() - old_state_values.detach()
-
-        dataset = TensorDataset(old_states, old_front_view, old_actions, old_logprobs, old_state_values, rewards,
-                                old_joined_actions_states)
+        dataset = TensorDataset(old_states, old_actions, old_joined_actions_states, old_logprobs, old_state_values,
+                                rewards)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
         # Optimize policy for K epochs
         for step in range(self.K_epochs):
-            print("Performing Optimization: ", step)
-            print("Slicing Batch")
+            # print("Performing Optimization: ", step)
+            # print("Slicing Batch")
             for id_batch, (old_states_batch,
-                           old_front_view_batch,
                            old_actions_batch,
+                           old_joined_actions_states_batch,
                            old_logprobs_batch,
                            old_state_values_batch,
                            rewards_batch,
-                           old_joined_actions_states_batch
                            ) in enumerate(dataloader):
-                print("Batch: ", id_batch)
+                # print("Batch: ", id_batch)
                 # Evaluating old actions and values
                 # print("Old Front View: ", old_front_view.shape)
                 # print("Old Actions Batched: ", old_actions_batch.shape)
                 # print("Old Front View Batched: ", old_front_view_batch.shape)
                 # print("Old States Batched: ", old_states_batch.shape)
                 # print("Old Joined Actions States Batched: ", old_joined_actions_states_batch.shape)
-                logprobs, dist_entropy, action_state_value = self.central_policy.evaluate(
+                logprobs, dist_entropy, state_value = self.central_policy.evaluate(
                     old_states_batch,
-                    old_front_view_batch,
                     old_actions_batch,
                     old_joined_actions_states_batch
                 )
                 # print("action_state_value: ", action_state_value.shape)
 
                 # match state_values tensor dimensions with rewards tensor
-                action_state_value = torch.squeeze(action_state_value)
-                advantages = rewards_batch.detach() + action_state_value.detach() - old_state_values_batch.detach()
+                state_value = torch.squeeze(state_value)
+                # print("rewards_batch: ", rewards_batch.shape)
+                # print("state_value: ", old_state_values_batch.shape)
+                advantages = rewards_batch.detach() + state_value.detach() - old_state_values_batch.detach()
 
                 # Finding the ratio (pi_theta / pi_theta__old)
                 # print("logprobs: ", logprobs.shape)
                 # print("old_logprobs: ", old_logprobs.shape)
                 ratios = torch.exp(logprobs - old_logprobs_batch.detach())
+                # print("Ratios: ", ratios.shape)
 
                 # Finding Surrogate Loss
 
                 # print("ratios: ", ratios.shape)
-                advantages = advantages.unsqueeze(1)
+                # advantages = advantages.unsqueeze(1)
                 # print("advantages: ", advantages.shape)
+                advantages = advantages.unsqueeze(1)
+                # print("Advantages: ", advantages.shape)
                 surr1 = ratios * advantages
                 surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
 
@@ -327,25 +210,27 @@ class MultiPPOClipBetaAgents(nn.Module):
                 # print("rewards: ", rewards.shape)
                 # print("dist_entropy: ", dist_entropy)
                 # final loss of clipped objective PPO
-                loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(action_state_value,
+                loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_value,
                                                                      rewards_batch) - 0.01 * dist_entropy
 
                 # take gradient step
                 self.optimizer.zero_grad()
                 loss.mean().backward()
                 self.optimizer.step()
-                advantages = advantages.squeeze(1)
+                # advantages = advantages.squeeze(1)
 
         # Copy new weights into old policy
         for key in self.decentralized_policies.keys():
-            self.decentralized_policies[key].actor.load_state_dict(self.central_policy.actor.state_dict())
+            self.decentralized_policies[key].load_state_dict(self.central_policy.state_dict())
 
         # clear buffer
         self.rollout_buffer.clear()
 
     def save(self, checkpoint_path):
-        torch.save(self.policy_old.state_dict(), checkpoint_path)
+        torch.save(self.central_policy.state_dict(), checkpoint_path)
 
     def load(self, checkpoint_path):
-        self.policy_old.load_state_dict(torch.load(checkpoint_path, map_location=lambda storage, loc: storage))
-        self.policy.load_state_dict(torch.load(checkpoint_path, map_location=lambda storage, loc: storage))
+        self.central_policy.load_state_dict(torch.load(checkpoint_path, map_location=lambda storage, loc: storage))
+        for key in self.decentralized_policies.keys():
+            self.decentralized_policies[key].load_state_dict(
+                torch.load(checkpoint_path, map_location=lambda storage, loc: storage))

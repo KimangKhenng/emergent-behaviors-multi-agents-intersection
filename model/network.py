@@ -2,9 +2,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fu
-from torch.distributions import Beta
+from torch.distributions import Beta, MultivariateNormal
 
 from envs.multi_agents import STATE_DIM
+
+# set device to cpu or cuda
+device = torch.device('cpu')
+if torch.cuda.is_available():
+    device = torch.device('cuda:0')
+    torch.cuda.empty_cache()
 
 
 # Define hybrid policy architecture
@@ -244,22 +250,24 @@ class BetaPolicy(nn.Module):
         super().__init__()
         self.actor = nn.Sequential(
             nn.Linear(input_size, hidden_size),
-            nn.LeakyReLU(),
+            nn.Tanh(),
             # nn.BatchNorm1d(hidden_size),
             nn.Linear(hidden_size, hidden_size),
-            nn.LeakyReLU(),
+            nn.Tanh(),
             # nn.BatchNorm1d(hidden_size),
         )
 
         self.alpha = nn.Sequential(
-            nn.Linear(hidden_size, action_size, bias=False),
-            nn.Softplus(),
+            nn.Linear(hidden_size, action_size, bias=True),
+            nn.Softplus()
         )
+        # self.alpha.weight.data.mul_(0.125)
 
         self.beta = nn.Sequential(
-            nn.Linear(hidden_size, action_size, bias=False),
-            nn.Softplus(),
+            nn.Linear(hidden_size, action_size, bias=True),
+            nn.Softplus()
         )
+        # self.beta.weight.data.mul_(0.125)
 
         self.critic = nn.Sequential(
             nn.Linear(input_size, hidden_size),
@@ -273,21 +281,218 @@ class BetaPolicy(nn.Module):
         raise NotImplementedError
 
     def act(self, state):
-        alpha = self.alpha(self.actor(state)) + 1.0
-        beta = self.beta(self.actor(state)) + 1.0
-        # policy distribution - using Beta here which is a lot more efficient than Gaussian
-        policy_dist = torch.distributions.Beta(alpha, beta)
-        action = policy_dist.sample()
-        log_prob = policy_dist.log_prob(action).sum(-1).unsqueeze(-1)
+        ab_sa = self.alpha(self.actor(state)) + 1.0
+        ab_acc = self.beta(self.actor(state)) + 1.0
+
+        sa_dist = Beta(ab_sa[0], ab_sa[1])
+        acc_dist = Beta(ab_acc[0], ab_acc[1])
+
+        sa_action = 2.0 * sa_dist.sample() - 1.0
+        acc_action = 2.0 * acc_dist.sample() - 1.0
+
+        sa_logprobs = sa_dist.log_prob((sa_action + 1.0) / 2.0)
+        acc_logprobs = acc_dist.log_prob((acc_action + 1.0) / 2.0)
+        logprobls = (sa_logprobs.detach(), acc_logprobs.detach())
+
         state_val = self.critic(state)
-        return action.detach(), log_prob.detach(), state_val.detach()
+        return np.array([sa_action.detach().cpu().numpy(), acc_action.detach().cpu().numpy()]), logprobls, state_val
+
+    def evaluate(self, state, actions):
+        ab_sa = self.alpha(self.actor(state)) + 1.0
+        ab_acc = self.beta(self.actor(state)) + 1.0
+
+        sa_dist = Beta(ab_sa[:, 0], ab_sa[:, 1])
+        acc_dist = Beta(ab_acc[:, 0], ab_acc[:, 1])
+
+        sa_logprobs = sa_dist.log_prob((actions[:, 0] + 1.0) / 2)
+        sa_dist_entropy = sa_dist.entropy()
+        # print("SA logprobs: ", sa_logprobs)
+
+        acc_logprobs = acc_dist.log_prob((actions[:, 1] + 1.0) / 2)
+        acc_dist_entropy = acc_dist.entropy()
+
+        action_state_value = self.critic(state)
+
+        logprobs = torch.cat([sa_logprobs.unsqueeze(1), acc_logprobs.unsqueeze(1)], dim=1)
+        dist_entropy = torch.cat([sa_dist_entropy.unsqueeze(1), acc_dist_entropy.unsqueeze(1)], dim=1)
+
+        return logprobs, dist_entropy, action_state_value
+
+
+class JoinedBetaPolicy(nn.Module):
+    def __init__(self, input_size, hidden_size, action_size):
+        super().__init__()
+        self.actor = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Tanh(),
+            # nn.BatchNorm1d(hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            # nn.BatchNorm1d(hidden_size),
+        )
+
+        self.alpha = nn.Sequential(
+            nn.Linear(hidden_size, action_size, bias=True),
+            nn.Softplus()
+        )
+        # self.alpha.weight.data.mul_(0.125)
+
+        self.beta = nn.Sequential(
+            nn.Linear(hidden_size, action_size, bias=True),
+            nn.Softplus()
+        )
+        # self.beta.weight.data.mul_(0.125)
+
+        self.critic = nn.Sequential(
+            nn.Linear(input_size + 1, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 1)
+        )
+
+    def forward(self):
+        raise NotImplementedError
+
+    def act(self, state):
+        ab_sa = self.alpha(self.actor(state)) + 1.0
+        ab_acc = self.beta(self.actor(state)) + 1.0
+
+        sa_dist = Beta(ab_sa[0], ab_sa[1])
+        acc_dist = Beta(ab_acc[0], ab_acc[1])
+
+        sa_action = 2.0 * sa_dist.sample() - 1.0
+        acc_action = 2.0 * acc_dist.sample() - 1.0
+
+        sa_logprobs = sa_dist.log_prob((sa_action + 1.0) / 2.0)
+        acc_logprobs = acc_dist.log_prob((acc_action + 1.0) / 2.0)
+        logprobls = (sa_logprobs.detach(), acc_logprobs.detach())
+
+        # state_val = self.critic(state)
+        return np.array([sa_action.detach().cpu().numpy(), acc_action.detach().cpu().numpy()]), logprobls
+
+    def evaluate(self, state, actions, join):
+        ab_sa = self.alpha(self.actor(state)) + 1.0
+        ab_acc = self.beta(self.actor(state)) + 1.0
+
+        sa_dist = Beta(ab_sa[:, 0], ab_sa[:, 1])
+        acc_dist = Beta(ab_acc[:, 0], ab_acc[:, 1])
+
+        sa_logprobs = sa_dist.log_prob((actions[:, 0] + 1.0) / 2)
+        sa_dist_entropy = sa_dist.entropy()
+        # print("SA logprobs: ", sa_logprobs)
+
+        acc_logprobs = acc_dist.log_prob((actions[:, 1] + 1.0) / 2)
+        acc_dist_entropy = acc_dist.entropy()
+
+        action_state_value = self.critic(join)
+
+        logprobs = torch.cat([sa_logprobs.unsqueeze(1), acc_logprobs.unsqueeze(1)], dim=1)
+        dist_entropy = torch.cat([sa_dist_entropy.unsqueeze(1), acc_dist_entropy.unsqueeze(1)], dim=1)
+
+        return logprobs, dist_entropy, action_state_value
+
+
+class JoinedGaussianPolicy(nn.Module):
+    def __init__(self, input_size, hidden_size, action_size, action_std_init):
+        super().__init__()
+        self.action_size = action_size
+        self.action_var = torch.full((action_size,), action_std_init * action_std_init).to(device)
+        # actor
+        self.actor = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, action_size),
+            nn.Tanh()
+        )
+        # critic
+        self.critic = nn.Sequential(
+            nn.Linear(input_size + 1, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 1)
+        )
+
+    def set_action_std(self, new_action_std):
+        self.action_var = torch.full((self.action_size,), new_action_std * new_action_std).to(device)
+
+    def forward(self):
+        raise NotImplementedError
+
+    def act(self, state):
+        action_mean = self.actor(state)
+        cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
+        dist = MultivariateNormal(action_mean, cov_mat)
+
+        action = dist.sample()
+        action_logprob = dist.log_prob(action)
+        # state_val = self.critic(state)
+
+        return action.detach().cpu().numpy().flatten(), action_logprob.detach().cpu()
+
+    def evaluate(self, state, action, join):
+        action_mean = self.actor(state)
+
+        action_var = self.action_var.expand_as(action_mean)
+        cov_mat = torch.diag_embed(action_var).to(device)
+        dist = MultivariateNormal(action_mean, cov_mat)
+
+        action_logprobs = dist.log_prob(action)
+        dist_entropy = dist.entropy()
+        state_values = self.critic(join)
+
+        return action_logprobs, state_values, dist_entropy
+
+
+class GaussianPolicy(nn.Module):
+    def __init__(self, input_size, hidden_size, action_size, action_std_init):
+        super().__init__()
+        self.action_size = action_size
+        self.action_var = torch.full((action_size,), action_std_init * action_std_init).to(device)
+        # actor
+        self.actor = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, action_size),
+            nn.Tanh()
+        )
+        # critic
+        self.critic = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 1)
+        )
+
+    def set_action_std(self, new_action_std):
+        self.action_var = torch.full((self.action_size,), new_action_std * new_action_std).to(device)
+
+    def forward(self):
+        raise NotImplementedError
+
+    def act(self, state):
+        action_mean = self.actor(state)
+        cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
+        dist = MultivariateNormal(action_mean, cov_mat)
+
+        action = dist.sample()
+        action_logprob = dist.log_prob(action)
+        # state_val = self.critic(state)
+
+        return action.detach().cpu().numpy().flatten(), action_logprob.detach().cpu()
 
     def evaluate(self, state, action):
-        alpha = self.alpha(self.actor(state)) + 1.0
-        beta = self.beta(self.actor(state)) + 1.0
-        # policy distribution - using Beta here which is a lot more efficient than Gaussian
+        action_mean = self.actor(state)
 
-        dist = torch.distributions.Beta(alpha, beta)
+        action_var = self.action_var.expand_as(action_mean)
+        cov_mat = torch.diag_embed(action_var).to(device)
+        dist = MultivariateNormal(action_mean, cov_mat)
 
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()

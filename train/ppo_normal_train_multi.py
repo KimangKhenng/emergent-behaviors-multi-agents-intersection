@@ -1,27 +1,19 @@
+import copy
 from datetime import datetime
 import os
 
-from algos.single.ppo_clip_mlp_beta import SPPOClipMLPBeta
+from algos.multi.multi_ppo_clip_normal import MultiPPOClipNormalAgents
+from envs.multi_agents_lidar import MultiAgentsLidarEnv
 
-from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
 import json
-import zipfile
-import glob
-
-
-def zip_directory(directory_path, zip_file_path):
-    with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(directory_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                zipf.write(file_path, arcname=os.path.relpath(file_path, directory_path))
 
 
 def train():
     """
     initialize environment hyperparameters
     """
-    env_name = "SingleAgentIntersection-MLP-Beta-v2"
+    env_name = "Multi-Intersection-PPO-Clip_Normal-v1"
+    num_agents = 4
     max_ep_len = 1000  # max timesteps in one episode
     max_training_timesteps = int(1e6)  # break training loop if timeteps > max_training_timesteps
 
@@ -32,16 +24,22 @@ def train():
     update_timestep = max_ep_len * 2  # update policy every n timesteps
 
     """
-    PPO Hyperparameters
+    PPO Normal Hyperparameters
     """
     # update_timestep = 100  # update policy every n timesteps
     K_epochs = 5  # update policy for K epochs in one PPO update
+    batch_size = 128  # minibatch size
 
     eps_clip = 0.2  # clip parameter for PPO
     gamma = 0.99  # discount factor
 
     lr_actor = 0.0003  # learning rate for actor network
     lr_critic = 0.001  # learning rate for critic network
+
+    action_std = 0.6  # starting std for action distribution (Multivariate Normal)
+    action_std_decay_rate = 0.05  # linearly decay action_std (action_std = action_std - action_std_decay_rate)
+    min_action_std = 0.1  # minimum action_std (stop decay after action_std <= min_action_std)
+    action_std_decay_freq = int(2.5e5)  # action_std decay frequency (in num timesteps)
 
     """
     Policy Parameters
@@ -52,11 +50,11 @@ def train():
     """
     Make Enviorment
     """
-    env = SingleAgentInterLidarEnv()
+    env = MultiAgentsLidarEnv(num_agents=num_agents)
 
-    state_dim = env.observation_space.shape[0]
+    state_dim = env.observation_space['agent0'].shape[0]
 
-    action_dim = env.action_space.shape[0]
+    action_dim = env.action_space['agent0'].shape[0]
 
     ###################### logging ######################
 
@@ -74,6 +72,7 @@ def train():
     """
     train_config = {
         "env_name": env_name,
+        "num_agents": num_agents,
         "max_ep_len": max_ep_len,
         "max_training_timesteps": max_training_timesteps,
         "print_freq": print_freq,
@@ -84,10 +83,15 @@ def train():
     }
     ppo_config = {
         "K_epochs": K_epochs,
+        "batch_size": batch_size,
         "eps_clip": eps_clip,
         "gamma": gamma,
         "lr_actor": lr_actor,
         "lr_critic": lr_critic,
+        "action_std": action_std,
+        "action_std_decay_rate": action_std_decay_rate,
+        "min_action_std": min_action_std,
+        "action_std_decay_freq": action_std_decay_freq,
     }
     policy_config = {
         "hidden_size": hidden_size,
@@ -110,7 +114,7 @@ def train():
     print("current number of files : ", run_num)
 
     #### create new log file for each run
-    log_f_name = log_dir + '/PPO_' + env_name + "_log_reward_" + str(run_num) + ".csv"
+    log_f_name = log_dir + 'PPO_' + env_name + "_log_reward_" + str(run_num) + ".csv"
 
     print("current logging run number for " + env_name + " : ", run_num)
     print("logging at : " + log_f_name)
@@ -148,6 +152,10 @@ def train():
     print("PPO K epochs : ", K_epochs)
     print("PPO epsilon clip : ", eps_clip)
     print("discount factor (gamma) : ", gamma)
+    print("starting std of action distribution : ", action_std)
+    print("decay rate of std of action distribution : ", action_std_decay_rate)
+    print("minimum std of action distribution : ", min_action_std)
+    print("decay frequency of std of action distribution : " + str(action_std_decay_freq) + " timesteps")
     print("--------------------------------------------------------------------------------------------")
     print("optimizer learning rate actor : ", lr_actor)
     print("optimizer learning rate critic : ", lr_critic)
@@ -158,15 +166,18 @@ def train():
     ################# training procedure ################
 
     # initialize a PPO agent
-    ppo_agent = SPPOClipMLPBeta(state_dim=state_dim,
-                                lr_actor=lr_actor,
-                                lr_critic=lr_critic,
-                                gamma=gamma,
-                                K_epochs=K_epochs,
-                                eps_clip=eps_clip,
-                                hidden_dim=hidden_size,
-                                action_dim=action_dim,
-                                )
+    ppo_agent = MultiPPOClipNormalAgents(num_agents=num_agents,
+                                         batch_size=batch_size,
+                                         state_dim=state_dim,
+                                         lr_actor=lr_actor,
+                                         lr_critic=lr_critic,
+                                         gamma=gamma,
+                                         K_epochs=K_epochs,
+                                         eps_clip=eps_clip,
+                                         hidden_dim=hidden_size,
+                                         action_dim=action_dim,
+                                         action_std_init=action_std,
+                                         )
 
     # track total training time
     start_time = datetime.now().replace(microsecond=0)
@@ -199,23 +210,38 @@ def train():
         d["__all__"] = False
 
         for t in range(1, max_ep_len + 1):
-            actions = ppo_agent.select_action(obs)
-            # beta distribution outputs actions between 0-1 and this converts them to -1,1 range
-            # actions = 2.0 * actions - 1.0
+            actions = ppo_agent.select_actions(obs)
 
             obs, r, d, i = env.step(actions)
-            env.render(mode="top_down", film_size=(1000, 1000), track_target_vehicle=True, screen_size=(1000, 1000))
+            # env.render(mode="top_down", film_size=(1000, 1000), screen_size=(1000, 1000))
+            # Remove dead agent
+            for key in d.keys():
+                if d[key]:
+                    obs.pop(key, None)
+            # print("Actions : ", actions)
+            # print("Reward : ", r)
+            # print("Terminated : ", d)
+            # print("State size", len(ppo_agent.buffer.states))
+            # ppo_agent.buffer.add_reward(r, num_agents)
+            # ppo_agent.buffer.add_terminated(d, num_agents)
 
-            ppo_agent.buffer.rewards.append(r)
-            ppo_agent.buffer.is_terminals.append(d)
+            ppo_agent.rollout_buffer.rewards.append(r)
+            ppo_agent.rollout_buffer.is_terminated.append(copy.deepcopy(d))
+            # print("Reward Size : ", len(ppo_agent.buffer.rewards))
+            # print("Terminated Size : ", len(ppo_agent.buffer.is_terminated))
 
             time_step += 1
-            current_ep_reward += r
+            current_ep_reward += sum(r.values())
+            # print("time_step : ", time_step)
 
             # update PPO agent
             if time_step % update_timestep == 0:
                 ppo_agent.update()
                 # obs = env.reset()
+
+            # if continuous action space; then decay action std of ouput action distribution
+            if time_step % action_std_decay_freq == 0:
+                ppo_agent.decay_action_std(action_std_decay_rate, min_action_std)
 
             # log in logging file
             if time_step % log_freq == 0:
@@ -253,7 +279,8 @@ def train():
                 print("--------------------------------------------------------------------------------------------")
 
             # break; if the episode is over
-            if d:
+            if d["__all__"]:
+                # print("Episodic Reward :", current_ep_reward)
                 break
 
         print_running_reward += current_ep_reward

@@ -9,16 +9,6 @@ import numpy as np
 from algos.single.ppo_clip_mlp_normal import SinglePPOClipMLPNormalAgent
 from envs.single_agent_intersection_lidar import SingleAgentInterLidarEnv
 import json
-import zipfile
-import glob
-
-
-def zip_directory(directory_path, zip_file_path):
-    with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(directory_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                zipf.write(file_path, arcname=os.path.relpath(file_path, directory_path))
 
 
 ################################### Training ###################################
@@ -105,10 +95,10 @@ def train():
         "gamma": gamma,
         "lr_actor": lr_actor,
         "lr_critic": lr_critic,
-        "action_std": 0.6,
-        "action_std_decay_rate": 0.05,
-        "min_action_std": 0.1,
-        "action_std_decay_freq": int(2.5e5),
+        "action_std": action_std,
+        "action_std_decay_rate": action_std_decay_rate,
+        "min_action_std": min_action_std,
+        "action_std_decay_freq": action_std_decay_freq,
     }
     policy_config = {
         "hidden_size": hidden_size,
